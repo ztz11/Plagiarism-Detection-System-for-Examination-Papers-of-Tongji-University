@@ -490,14 +490,27 @@
 </template>
 
 <script setup>
+/**
+ * setting.vue - 系统设置页面
+ *
+ * 管理以下配置模块：
+ * 1. API 配置管理（LLM 服务的增删改查、当前激活选择）
+ * 2. 远程题库维护（MongoDB 连接的增删改测）
+ * 3. 学科维护（学科代码/名称的 CRUD）
+ * 4. 学院管理（学院名称的 CRUD）
+ * 5. AI 默认值（切分/报告功能的默认开关）
+ * 6. AI 切分提示词（自定义 prompt 模板）
+ * 7. 重复度阈值（敏感度滑块 0-100%）
+ * 8. 格式校验项目（9 项开关配置）
+ */
 import { ref, reactive, computed, onMounted, h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
-// ---------- 侧边栏控制 ----------
+// ==================== 侧边栏控制 ====================
 const isCollapsed = ref(true)
 const toggleSidebar = () => isCollapsed.value = !isCollapsed.value
 
-// ---------- 用户信息 ----------
+// ==================== 用户信息 ====================
 const currentUser = ref({ fullName: '', employeeId: '' })
 const router = useRouter()
 const route = useRoute()
@@ -505,7 +518,7 @@ const route = useRoute()
 const goToProfile = () => { router.push('/profile') }
 const logout = () => { localStorage.removeItem('currentUser'); router.push('/login') }
 
-// ---------- 菜单配置 ----------
+// ==================== 菜单配置 ====================
 const menuItems = [
   { id: 'home', name: '主页', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [ h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' }) ]) },
   { id: 'history', name: '历史项目', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [ h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' }) ]) },
@@ -539,7 +552,7 @@ const isActive = (id) => {
 
 const electronAPI = window.electronAPI
 
-// ---------- API 管理 ----------
+// ==================== API 配置管理 ====================
 const apiConfigs = ref([])
 const apiSearch = ref('')
 const apiSortBy = ref('name')
@@ -563,11 +576,12 @@ const showApiDialog = ref(false)
 const editingApi = ref(null)
 const apiForm = reactive({ name: '', endpoint: '', model: '', api_key: '', is_local: false })
 
+// NLP 内置 API 的特殊处理（不允许删除/重命名）
 const isNlpApiName = (name) => String(name || '').trim().toLowerCase() === 'nlp'
 const isEditingNlpApi = computed(() => editingApi.value && isNlpApiName(editingApi.value.name))
 const hasNlpApi = () => apiConfigs.value.some(api => isNlpApiName(api.name))
 
-// ---------- 远程题库维护 ----------
+// ==================== 远程题库维护 ====================
 const remoteBanks = ref([])
 const remoteSearch = ref('')
 const filteredRemoteBanks = computed(() => {
@@ -638,7 +652,7 @@ async function testRemoteBank(bank) {
   } catch (e) { await showAlert('测试失败：' + e.message) }
 }
 
-// ---------- 学科维护 ----------
+// ==================== 学科维护 ====================
 const courses = ref([])
 const courseSearch = ref('')
 const courseSortBy = ref('code')
@@ -660,7 +674,7 @@ const showCourseDialog = ref(false)
 const editingCourse = ref(null)
 const courseForm = reactive({ code: '', name: '' })
 
-// ---------- 学院管理 ----------
+// ==================== 学院管理 ====================
 const colleges = ref([])
 const collegeSearch = ref('')
 const collegeSortBy = ref('name')
@@ -680,13 +694,13 @@ const showCollegeDialog = ref(false)
 const editingCollege = ref(null)
 const collegeForm = reactive({ name: '' })
 
-// ---------- AI 设置 ----------
+// ==================== AI 设置 ====================
 const aiSplitEnabled = ref(false)
 const aiReportEnabled = ref(false)
 const splitPrompt = ref('')
 const similarityThreshold = ref(50)
 
-// 格式校验项目
+// ==================== 格式校验项目 ====================
 const formatCheckItems = [
   { code: 'SUBJECT_NAME_CORRECT_FILLED', name: '科目名称是否正确填写', default: true },
   { code: 'SUBJECT_CODE_CORRECT_FILLED', name: '科目代码是否正确填写', default: true },

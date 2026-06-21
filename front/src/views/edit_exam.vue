@@ -261,6 +261,15 @@
 </template>
 
 <script setup>
+/**
+ * edit_exam.vue - 试卷划分编辑页面
+ *
+ * 核心功能：
+ * 1. 左侧：展示已切分的题目列表，支持增删题目、编辑题目的题型/分值/标签
+ * 2. 右侧：资源池（未分配的 block），支持拖拽/按钮移入题目
+ * 3. 支持块级文本编辑、块顺序调整、块在题目间的移动
+ * 4. 保存时的智能回退：内容变更的题目可选保留旧元数据
+ */
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -268,15 +277,16 @@ const route = useRoute()
 const router = useRouter()
 const docId = ref(Number(route.query.docId))
 
+// ---- 核心状态 ----
 const loading = ref(true)
-const analysisData = ref(null)
-const unassignedBlocks = ref([])
-const targetMap = reactive({})
+const analysisData = ref(null)             // { blocks, questions } 完整文档数据
+const unassignedBlocks = ref([])           // 未分配到题目的 block（右侧资源池）
+const targetMap = reactive({})             // block.id → 目标题目索引（下拉移动用）
 const source = ref(route.query.source || 'history')
 const returnUrl = ref(route.query.returnUrl || '')
-const newBlockText = ref('')
+const newBlockText = ref('')               // 新建块的输入文本
 
-// --- 对话�?---
+// ---- 对话框状态 ----
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const dialogMessage = ref('')
@@ -313,7 +323,7 @@ const handleDialogCancel = () => {
   dialogResolve?.(false)
 }
 
-// --- 元数据编辑状�?---
+// ---- 元数据内联编辑（题型、分值、标签）----
 const editingMetaField = ref(null)
 const editMetaValue = ref('')
 const metaInput = ref(null)
@@ -385,7 +395,7 @@ const autoAssignUnusedBlocks = () => {
   unassignedBlocks.value = data.blocks.filter(b => !usedIds.has(b.id))
 }
 
-// --- 块编�?---
+// ---- 块级文本内联编辑 ----
 const editingBlockId = ref(null)
 const editText = ref('')
 const editInput = ref(null)
@@ -414,7 +424,7 @@ const finishEdit = (blockId) => {
   commitEdit()
 }
 
-// --- 块移�?操作 ---
+// ---- 块移动操作（题目 ↔ 资源池）----
 const moveBlockToPool = (qIndex, blockId) => {
   commitEdit()
   const q = analysisData.value.questions[qIndex]
@@ -456,7 +466,7 @@ const moveBlockInQuestion = (qIndex, blockIdx, direction) => {
   analysisData.value.questions[qIndex].indices = [...indices]
 }
 
-// --- 题目增删 ---
+// ---- 题目增删 ----
 const insertQuestionAfter = (qIndex) => {
   commitEdit()
   analysisData.value.questions.splice(qIndex + 1, 0, {
@@ -497,7 +507,7 @@ const deleteQuestion = async (idx) => {
   analysisData.value.questions.splice(idx, 1)
 }
 
-// --- 块增�?---
+// ---- 块新增与永久删除 ----
 const addNewBlock = () => {
   const text = newBlockText.value.trim()
   if (!text) return
@@ -531,7 +541,7 @@ const getBackTarget = () => {
   return source.value === 'new-task' ? '/new-task' : '/history'
 }
 
-// --- 保存 ---
+// ---- 保存（含智能元数据回退逻辑）----
 const saveFinalResult = async () => {
   commitEdit()
   if (editingMetaField.value) {

@@ -152,6 +152,17 @@
 </template>
 
 <script setup>
+/**
+ * devide.vue - 试卷上传与切分页面
+ *
+ * 核心流程：
+ * 1. 选择学科代码、填写年份和学院
+ * 2. 上传 DOCX 文件（含重复名校验）
+ * 3. 配置 AI 切分和格式校验开关
+ * 4. 提交：备份 → 配置后端 → 格式校验 → LLM/NLP 切分 → 保存文档 → 跳转编辑页
+ *
+ * 该页面是前端到后端 AI 分析的核心入口。
+ */
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -159,7 +170,7 @@ import axios from 'axios'
 const route = useRoute()
 const router = useRouter()
 
-// 学科相关
+// ==================== 学科搜索 ====================
 const subjectInput = ref('')
 const selectedSubject = ref(null)
 const filteredSubjects = ref([])
@@ -175,7 +186,7 @@ const showCollegeSuggestions = ref(false)
 const highlightCollegeIdx = ref(-1)
 let collegeTimer = null
 
-// 新增字段
+// ==================== 表单字段 ====================
 const examYear = ref('')
 const examCollege = ref('')
 const examYearError = ref('')  // 年份校验错误信息
@@ -187,7 +198,7 @@ const previousPage = ref(route.query.from || '/menu')
 const projectNameFromQuery = ref(route.query.projectName || '')
 const isDuplicateName = ref(false)
 
-// AI 相关
+// ==================== AI 开关 ====================
 const aiSplitEnabled = ref(false)
 const aiFormatCheckEnabled = ref(true)
 const splitPrompt = ref('')
@@ -459,7 +470,7 @@ onMounted(async () => {
   }
 })
 
-// ================== 文件选择处理 ==================
+// ==================== 文件选择处理 ====================
 const handleFileUpload = async (event) => {
   const file = event.target.files[0]
 
@@ -489,8 +500,12 @@ const handleFileUpload = async (event) => {
   selectedFile.value = file
 }
 
-// ================== 后端配置 ==================
+// ==================== 后端配置 ====================
 async function configureBackendApi(baseUrl, modelName, apiKey) {
+  /**
+   * 调用后端 /set-config 接口同步 LLM 配置。
+   * 每次 AI 操作前必须调用，确保后端使用正确的 API 参数。
+   */
   const formData = new FormData()
   formData.append('base_url', baseUrl)
   formData.append('model_name', modelName)
@@ -537,8 +552,12 @@ async function getActiveApiConfig() {
   return { baseUrl, modelName, apiKey, is_local }
 }
 
-// ================== 核心提交 ==================
+// ==================== 核心提交流程 ====================
 const submitFile = async () => {
+  /**
+   * 主流程：备份 → 配置后端 → 格式校验 → AI/手动切分 → 保存文档 → 跳转。
+   * 每个步骤间有 loading 提示，失败时展示具体错误信息。
+   */
   if (!selectedFile.value) {
     await showAlert('请先选择试卷')
     return

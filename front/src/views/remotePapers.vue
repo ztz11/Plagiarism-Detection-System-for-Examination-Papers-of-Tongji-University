@@ -229,6 +229,12 @@
 </template>
 
 <script setup>
+/**
+ * remotePapers.vue - 远程题库试卷抓取页面
+ *
+ * 从远程 MongoDB 题库中查询和导入试卷数据。
+ * 支持选择远程连接、按科目/年份等条件检索试卷、一键导入到本地题库。
+ */
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 

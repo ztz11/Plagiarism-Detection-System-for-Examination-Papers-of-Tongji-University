@@ -125,6 +125,12 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * menu.vue - 主导航页面
+ *
+ * 展示用户可用的功能入口卡片：新建项目、历史项目、题库管理、设置。
+ * 包含最近项目列表，可快速跳转继续工作。
+ */
 import { ref, h, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 

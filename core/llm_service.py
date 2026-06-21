@@ -1,17 +1,15 @@
 """
-llm_service.py - LLM 服务调用模块
+llm_service.py - LLM 服务调用层
 
-提供与 LLM（大语言模型）交互的核心功能：
-1. 试卷结构分析（题目分割）
-2. 题目信息提取（题型、分数、知识点标签）
-3. 标签相似度检测
-4. 题目相似度计算
-5. 试卷格式校验
+本模块封装了所有与 LLM（大语言模型）的交互逻辑，包括：
+- 试卷智能切分（get_online_segmentation）
+- 题目信息提取（extract_question_info）
+- 标签相似度判断（check_tags_similarity）
+- 题目内容相似度评分（compute_question_similarity）
+- 格式校验（call_llm_for_format_validation / call_llm_for_format_validation_local）
 
-技术依赖：
-- OpenAI API 客户端（支持兼容 OpenAI 格式的本地模型如 Ollama、LM Studio）
-- instructor 库（实现结构化输出）
-- PyMuPDF（PDF 文本提取）
+所有 LLM 调用均通过 instructor 库实现结构化输出（Pydantic 模型约束）。
+支持任意 OpenAI 兼容 API（如通义千问、DeepSeek、Ollama 等）。
 """
 
 import os
@@ -19,30 +17,25 @@ import shutil
 import subprocess
 import tempfile
 
-import instructor  # 用于强制 LLM 返回结构化输出
+import instructor
 import re
 import json
 from typing import List, Optional, Dict, Any
 
-from openai import OpenAI  # OpenAI API 客户端
-from pydantic import BaseModel, Field  # 数据模型定义
+from openai import OpenAI
+from pydantic import BaseModel, Field
 
-import fitz  # PyMuPDF，用于 PDF 文本提取
+import fitz  # PyMuPDF
 
-# 导入项目数据模型
 from schemas import (
     ExamMap, QuestionInfoResponse,
     TagSimilarityResult, SimilarityScoreResult, QuestionItem
 )
 
 
-# ---------- 格式校验的结构化模型 ----------
+# ==================== 格式校验的结构化模型 ====================
 class FormatCheckResult(BaseModel):
-    """
-    单个格式校验项的结果模型
-    
-    用于接收 LLM 返回的结构化校验结果，确保输出格式符合预期。
-    """
+    """LLM 返回的单条格式校验结果"""
     code: str = Field(..., description="校验项代码，如 SUBJECT_NAME_CORRECT_FILLED")
     name: str = Field(..., description="校验项名称")
     passed: bool = Field(..., description="是否通过校验")
@@ -50,43 +43,27 @@ class FormatCheckResult(BaseModel):
 
 
 class FormatValidationOutput(BaseModel):
-    """
-    格式校验输出模型
-    
-    包含所有校验项的结果列表，通过 instructor 强制 LLM 返回此结构。
-    """
+    """LLM 格式校验的结构化输出容器"""
     results: List[FormatCheckResult] = Field(..., description="所有校验项的结果列表")
 
+# ==================== 本地文档解析辅助函数 ====================
 
-# ---------- 本地文档解析函数 ----------
 def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
     """
-    使用 LibreOffice 将 DOCX 字节流转为 PDF 字节流
-    
-    参数:
-        docx_bytes: DOCX 文件的二进制数据
-        
-    返回:
-        bytes: PDF 文件的二进制数据
-        
-    抛出:
-        RuntimeError: LibreOffice 未安装或转换失败
+    使用 LibreOffice headless 模式将 DOCX 字节流转换为 PDF 字节流。
+
+    用于本地格式校验模式：先将 DOCX 转 PDF，再从 PDF 提取结构化文本。
     """
     if not shutil.which("soffice"):
         raise RuntimeError("LibreOffice 未安装或不在 PATH 中")
-    
     with tempfile.TemporaryDirectory() as tmpdir:
         docx_path = os.path.join(tmpdir, "input.docx")
         with open(docx_path, "wb") as f:
             f.write(docx_bytes)
-        
-        # 调用 LibreOffice 转换
         subprocess.run(
             ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmpdir, docx_path],
             check=True, capture_output=True, text=True
         )
-        
-        # 读取转换后的 PDF
         pdf_path = os.path.join(tmpdir, "input.pdf")
         with open(pdf_path, "rb") as f:
             return f.read()
@@ -96,36 +73,28 @@ def _extract_structured_text(pdf_bytes: bytes,
                              header_height: int = 70,
                              footer_bottom_margin: int = 70) -> str:
     """
-    从 PDF 字节流提取结构化文本（包含页眉、正文、页脚）
-    
-    将 PDF 每页的内容按区域提取，便于 LLM 进行格式校验。
-    
-    参数:
-        pdf_bytes: PDF 文件的二进制数据
-        header_height: 页眉区域高度（像素）
-        footer_bottom_margin: 页脚区域底部边距（像素）
-        
-    返回:
-        str: 结构化文本，包含每页的页眉、正文、页脚信息
+    从 PDF 字节流提取每页的页眉、正文、页脚，拼接为结构化文本。
+
+    使用 PyMuPDF 按区域裁剪提取：
+    - 页眉区：页面顶部 header_height 像素
+    - 正文区：页眉下方到页脚上方
+    - 页脚区：页面底部 footer_bottom_margin 像素
+
+    输出格式便于 LLM 进行格式校验（如检查页眉页码等）。
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages = []
     total = doc.page_count
-    
     for i, page in enumerate(doc):
         w, h = page.rect.width, page.rect.height
-        
-        # 定义页面区域
         header_rect = fitz.Rect(0, 0, w, header_height)
         body_rect = fitz.Rect(0, header_height, w, h - footer_bottom_margin)
         footer_rect = fitz.Rect(0, h - footer_bottom_margin, w, h)
 
-        # 提取各区域文本
         header = page.get_text("text", clip=header_rect).strip()
         body = page.get_text("text", clip=body_rect).strip()
         footer = page.get_text("text", clip=footer_rect).strip()
 
-        # 组织成结构化格式
         parts = [f"=== 第 {i+1} 页 / 共 {total} 页 ==="]
         if header:
             parts.append(f"[页眉] {header}")
@@ -133,14 +102,13 @@ def _extract_structured_text(pdf_bytes: bytes,
             parts.append(f"[正文]\n{body}")
         if footer:
             parts.append(f"[页脚] {footer}")
-        
         pages.append("\n".join(parts))
-    
     doc.close()
     return "\n\n".join(pages)
 
 
-# ---------- 本地模式格式校验函数 ----------
+# ==================== 格式校验函数 ====================
+
 def call_llm_for_format_validation_local(
         docx_bytes: bytes,
         enabled_checks: dict,
@@ -150,33 +118,16 @@ def call_llm_for_format_validation_local(
         expected_total_score: Optional[float] = None
 ) -> List[Dict[str, Any]]:
     """
-    本地解析 DOCX 后直接发送文本给 LLM 进行格式校验
-    
-    与远程模式的区别：
-    - 本地模式：先将 DOCX 转换为文本，再发送文本给 LLM
-    - 远程模式：上传 PDF 文件到 LLM 服务端
-    
-    适用场景：
-    - LLM 服务不支持文件上传
-    - 需要减少网络传输量
-    
-    参数:
-        docx_bytes: DOCX 文件的二进制数据
-        enabled_checks: 启用的校验项字典
-        api_key: API 密钥
-        base_url: LLM 服务地址
-        model_name: 模型名称
-        expected_total_score: 预期总分（用于总分校验）
-        
-    返回:
-        List[Dict]: 校验结果列表
+    本地模式格式校验：DOCX → PDF → 结构化文本 → LLM。
+
+    适用于不支持文件上传的 LLM API（如本地 Ollama），
+    在本地完成文档解析后仅发送纯文本给 LLM。
     """
-    # 构建校验提示词
     text_prompt = build_format_validation_prompt(enabled_checks, expected_total_score)
     if text_prompt == "没有需要校验的格式项。":
         return []
 
-    # 1. 本地解析 DOCX → 结构化文本
+    # 1. 本地解析 docx → 结构化文本
     try:
         pdf_bytes = _docx_to_pdf_bytes(docx_bytes)
         document_text = _extract_structured_text(pdf_bytes)
@@ -187,7 +138,6 @@ def call_llm_for_format_validation_local(
     system_content = "你是一个试卷格式校验专家。请仔细阅读以下文档内容，并严格按照要求输出结构化的数据。"
     user_content = f"{text_prompt}\n\n文档内容：\n{document_text}"
 
-    # 创建客户端并调用 LLM
     raw_client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
     client = instructor.from_openai(raw_client)
 
@@ -203,10 +153,9 @@ def call_llm_for_format_validation_local(
         )
         raw_results = [item.dict() for item in output.results]
 
-        # 3. 后处理：过滤和补全结果
+        # 3. 后处理（与原函数完全相同的逻辑，可抽取共用，这里为清晰直接复制）
         enabled_codes = {code for code, enabled in enabled_checks.items() if enabled}
         results_dict = {}
-        
         for res in raw_results:
             code = res.get("code", "").strip()
             if code in enabled_codes:
@@ -225,7 +174,6 @@ def call_llm_for_format_validation_local(
             "OPTIONS_NO_DUPLICATE": "所有选择题的选项编号和内容均无重复",
             "TOTAL_SCORE_IN_PREDETERMINED_RANGE": "总分在预设范围内"
         }
-        
         for code in enabled_codes:
             if code not in results_dict:
                 results_dict[code] = {
@@ -244,9 +192,10 @@ def call_llm_for_format_validation_local(
 
 def build_format_validation_prompt(enabled_checks: dict, expected_total_score: Optional[float] = None) -> str:
     """
-    构建格式校验的文本指令部分。
-    如果 TOTAL_SCORE_IN_PREDETERMINED_RANGE 启用，则加入总分校验规则。
-    重要：在输出格式中明确列出所有标准代码，要求 LLM 严格使用。
+    构建格式校验的 LLM 提示词。
+
+    根据启用的校验项动态生成包含详细校验规则和输出格式的提示词。
+    如果 TOTAL_SCORE_IN_PREDETERMINED_RANGE 启用，则嵌入预期总分。
     """
     check_descriptions = {
         "SUBJECT_NAME_CORRECT_FILLED": {
@@ -348,7 +297,10 @@ def build_format_validation_prompt(enabled_checks: dict, expected_total_score: O
 
 
 def _build_fallback_results(enabled_checks: dict, reason: str) -> List[Dict[str, Any]]:
-    """降级处理：返回所有开启项为未通过，并给出原因"""
+    """
+    降级处理：当 LLM 调用失败或文件解析失败时，
+    将所有开启的校验项标记为"未通过"，原因字段填入错误信息。
+    """
     check_names = {
         "SUBJECT_NAME_CORRECT_FILLED": "科目名称是否正确填写",
         "SUBJECT_CODE_CORRECT_FILLED": "科目代码是否正确填写",
@@ -382,9 +334,16 @@ def call_llm_for_format_validation(
         expected_total_score: Optional[float] = None
 ) -> List[Dict[str, Any]]:
     """
-    直接将 PDF 文件上传到 LLM 服务端，并通过 fileid:// 协议引用。
-    使用 instructor 保证结构化输出。
-    expected_total_score: 预期的试卷总分，用于 TOTAL_SCORE_IN_PREDETERMINED_RANGE 校验。
+    远程模式格式校验：上传 PDF 文件到 LLM 服务端进行格式校验。
+
+    适用于支持文件上传的 LLM API（如通义千问、DeepSeek 等）。
+    流程：
+    1. 上传 PDF 文件到 LLM → 获取 file_id
+    2. 通过 fileid:// 协议在 system prompt 中引用文件
+    3. LLM 直接读取 PDF 内容进行校验
+    4. 校验完成后自动删除临时文件
+
+    参数 expected_total_score: 用于 TOTAL_SCORE_IN_PREDETERMINED_RANGE 校验。
     """
     print("=" * 60)
     print("📋 格式校验请求参数")
@@ -498,7 +457,8 @@ def call_llm_for_format_validation(
                 print(f"⚠️ 删除文件失败: {e}")
 
 
-# ---------- 以下为原有函数（未修改） ----------
+# ==================== 试卷切分与题目分析 ====================
+
 def get_online_segmentation(
         blocks: list,
         api_key: str,
@@ -506,6 +466,13 @@ def get_online_segmentation(
         base_url: str,
         model_name: str
 ) -> ExamMap:
+    """
+    使用 LLM 对试卷 block 列表进行智能切分。
+
+    将试题相关的多个 block（如题目描述、选项、图表等）合并为题目组，
+    输出 ExamMap 结构（每道题包含所属 block 的 ID 列表）。
+    prompt 参数定义切分规则和输出格式。
+    """
     clean_blocks = []
     for b in blocks:
         clean_blocks.append({
@@ -541,6 +508,13 @@ def extract_question_info(
         model_name: str,
         context_blocks: Optional[List[str]] = None
 ) -> QuestionInfoResponse:
+    """
+    使用 LLM 从题目正文中提取题型、分值和 3 个知识标签。
+
+    支持通过 context_blocks（上下文 block 文本，如章节标题）辅助分值推断。
+    包含多层分值回退策略：LLM 输出 → 正则从正文提取 → 正则从上下文提取。
+    异常时返回默认值（题型=未知，分数=0，标签=其他考点）。
+    """
     try:
         instruction = (
             "你是一位中学/大学试题分析专家，请严格按以下规则解析题目。\n\n"
@@ -625,6 +599,12 @@ def check_tags_similarity(
         base_url: str,
         model_name: str
 ) -> bool:
+    """
+    LLM 模式下的标签初筛：判断两组标签中是否存在语义相似的配对。
+
+    这是 LLM 相似度检测的第一阶段过滤——标签不相似则无需进行内容比较。
+    容错：任一组标签为空则直接返回 True（跳过初筛）。
+    """
     if not tags1 or not tags2:
         return True
 
@@ -662,6 +642,17 @@ def compute_question_similarity(
         model_name: str,
         reason_threshold: float = 60.0
 ) -> tuple[int, str]:
+    """
+    LLM 模式下的题目内容相似度评分。
+
+    从三个维度比较两道题目：
+    1. 考查的核心知识点是否一致
+    2. 解题思路和关键步骤是否相同
+    3. 是否存在仅表面修改（换数字、换名称、换情境等）
+
+    返回 (相似度0-100, 重复原因说明)。
+    当相似度 ≥ reason_threshold 时生成原因说明，否则原因为空字符串。
+    """
     system_msg = (
         "你是一位教育内容分析专家。请分析两道题目是否语义重复，"
         "即是否考查相同的知识点和解题方法，即使题面、数值、情境做了修改。"

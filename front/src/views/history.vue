@@ -284,6 +284,12 @@
 </template>
 
 <script setup>
+/**
+ * history.vue - 历史项目列表页面
+ *
+ * 展示所有已创建的查重项目，支持搜索、排序、删除。
+ * 可点击项目查看详情或继续编辑试卷划分。
+ */
 import { ref, h, onMounted, onBeforeUnmount, computed, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
