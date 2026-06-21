@@ -1,0 +1,635 @@
+<template>
+  <div class="p-6 bg-gray-50 min-h-screen">
+    <div class="bg-white rounded-xl shadow-sm p-6">
+      <!-- 返回按钮 + 标题 -->
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+          <button
+            @click="goBack"
+            class="flex items-center text-gray-500 hover:text-blue-600 font-medium transition-colors"
+          >
+            <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+            返回
+          </button>
+          <div class="h-6 w-px bg-gray-200"></div>
+          <h2 class="text-2xl font-bold text-blue-800">远程题库试题列表</h2>
+        </div>
+      </div>
+
+      <!-- 筛选栏 -->
+      <div class="flex flex-wrap items-center gap-3 mb-6">
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">远程题库</label>
+          <select
+            v-model="selectedBankId"
+            @change="onBankChange"
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option :value="null">请选择</option>
+            <option v-for="b in remoteBanks" :key="b.id" :value="b.id">
+              {{ b.name }} ({{ b.endpoint }}:{{ b.port || '' }})
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">名称</label>
+          <input
+            v-model="filters.name"
+            placeholder="按名称模糊搜索"
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-48 focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">院系</label>
+          <input
+            v-model="filters.department"
+            placeholder="院系"
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-32 focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">年份</label>
+          <input
+            v-model="filters.year"
+            placeholder="年份"
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-24 focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <button
+          @click="fetchPapers"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+        >
+          查询
+        </button>
+      </div>
+
+      <!-- 排序与每页条数 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div class="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+          <label class="text-xs text-gray-600 whitespace-nowrap">排序</label>
+          <select v-model="sortBy" class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+            <option value="createdAt">创建时间</option>
+            <option value="name">名称</option>
+            <option value="score">分数</option>
+            <option value="year">年份</option>
+          </select>
+          <button
+            @click="toggleSortOrder"
+            class="p-1 text-gray-600 hover:text-blue-600 transition-colors"
+            :title="sortOrder === 'asc' ? '升序' : '降序'"
+          >
+            <svg v-if="sortOrder === 'asc'" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+            </svg>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">每页</label>
+          <select
+            v-model.number="pageSize"
+            @change="fetchPapers"
+            class="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+          >
+            <option :value="10">10</option>
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <div class="overflow-x-auto border border-gray-200 rounded-xl">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
+                <input type="checkbox" v-model="selectAll" @change="toggleSelectAll" />
+              </th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">paperId</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">分数</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">院系</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">年份</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">代码</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">更新时间</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            <tr v-for="p in papers" :key="p.paperId" class="hover:bg-gray-50 transition-colors">
+              <td class="px-4 py-3">
+                <input type="checkbox" v-model="selectedPapers" :value="p" />
+              </td>
+              <td class="px-4 py-3 font-mono text-xs">{{ p.paperId }}</td>
+              <td class="px-4 py-3">{{ p.name }}</td>
+              <td class="px-4 py-3">{{ p.score }}</td>
+              <td class="px-4 py-3">{{ p.department }}</td>
+              <td class="px-4 py-3">{{ p.year }}</td>
+              <td class="px-4 py-3">{{ p.code }}</td>
+              <td class="px-4 py-3 text-gray-500">{{ formatDate(p.createdAt) }}</td>
+              <td class="px-4 py-3 text-gray-500">{{ formatDate(p.updatedAt) }}</td>
+            </tr>
+            <tr v-if="papers.length === 0">
+              <td colspan="9" class="px-4 py-8 text-center text-gray-400">暂无数据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 分页 + 导入按钮 -->
+      <div class="mt-4 flex items-center justify-between">
+        <div class="text-sm text-gray-500">共 {{ total }} 条</div>
+        <div class="flex items-center gap-2">
+          <button
+            @click="prevPage"
+            :disabled="page === 1"
+            class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+          >
+            上一页
+          </button>
+          <span class="text-sm text-gray-600">第 {{ page }} 页</span>
+          <button
+            @click="nextPage"
+            :disabled="page * pageSize >= total"
+            class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+          >
+            下一页
+          </button>
+        </div>
+        <button
+          @click="startImport"
+          :disabled="selectedPapers.length === 0"
+          class="px-6 py-2 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 shadow-md disabled:bg-gray-400 disabled:cursor-not-allowed"
+        >
+          一键导入({{ selectedPapers.length }})
+        </button>
+      </div>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div v-if="dialogVisible" class="fixed inset-0 z-[350] flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-2">{{ dialogTitle }}</h3>
+        <p class="text-sm text-gray-700 mb-6 whitespace-pre-wrap">{{ dialogMessage }}</p>
+        <div class="flex justify-end gap-3">
+          <button
+            v-if="dialogType === 'confirm'"
+            @click="handleDialogCancel"
+            class="px-4 py-2 text-sm rounded-md bg-gray-200 hover:bg-gray-300"
+          >
+            取消
+          </button>
+          <button
+            @click="handleDialogConfirm"
+            class="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700"
+          >
+            {{ dialogType === 'alert' ? '确定' : '确认' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导入进度弹窗 -->
+    <div v-if="importProgressVisible" class="fixed inset-0 z-[300] flex items-center justify-center bg-black bg-opacity-50">
+      <div class="bg-white rounded-xl p-6 w-[700px] max-w-full shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-4">正在导入试卷...</h3>
+        <div class="mb-4 text-sm text-gray-600">进度：{{ importedCount }} / {{ selectedPapers.length }}</div>
+        <div class="max-h-96 overflow-y-auto space-y-2">
+          <div v-for="item in importProgressList" :key="item.paperId" class="border rounded p-2 text-sm">
+            <div class="font-medium">{{ item.name }}</div>
+            <div :class="item.status === 'success' ? 'text-green-600' : item.status === 'error' ? 'text-red-600' : 'text-gray-500'">
+              {{ item.message }}
+            </div>
+            <div v-if="item.warnings && item.warnings.length" class="text-xs text-yellow-600 mt-1">
+              ⚠️ {{ item.warnings.join('；') }}
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 flex justify-end">
+          <button
+            v-if="importFinished"
+            @click="closeImportDialog"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+const electronAPI = window.electronAPI
+
+// 返回上一页
+function goBack() {
+  router.back()
+}
+
+// -------------------- 弹窗 --------------------
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const dialogMessage = ref('')
+const dialogType = ref('alert')
+let dialogResolve = null
+
+const showAlert = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '提示'
+    dialogMessage.value = message
+    dialogType.value = 'alert'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const showConfirm = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '确认'
+    dialogMessage.value = message
+    dialogType.value = 'confirm'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const handleDialogConfirm = () => {
+  dialogVisible.value = false
+  if (dialogResolve) dialogResolve(true)
+  dialogResolve = null
+}
+
+const handleDialogCancel = () => {
+  dialogVisible.value = false
+  if (dialogResolve) dialogResolve(false)
+  dialogResolve = null
+}
+
+// -------------------- 原有远程列表逻辑 --------------------
+const remoteBanks = ref([])
+const selectedBankId = ref(null)
+const selectedBank = ref(null)
+const filters = ref({ name: '', department: '', year: '', code: '', paperId: '' })
+const sortBy = ref('createdAt')
+const sortOrder = ref('desc')
+const pageSize = ref(25)
+const page = ref(1)
+const papers = ref([])
+const total = ref(0)
+
+function toggleSortOrder() {
+  sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  fetchPapers()
+}
+
+function formatDate(val) {
+  if (!val) return ''
+  try {
+    const d = new Date(val)
+    return d.toLocaleString()
+  } catch (e) {
+    return String(val)
+  }
+}
+
+async function loadBanks() {
+  try {
+    const list = await electronAPI.remoteBanks.list()
+    remoteBanks.value = list || []
+    if (remoteBanks.value.length === 1) {
+      selectedBankId.value = remoteBanks.value[0].id
+      onBankChange()
+    }
+  } catch (e) {
+    console.error('加载远程题库失败', e)
+    await showAlert('加载远程题库失败：' + (e.message || '未知错误'))
+  }
+}
+
+function onBankChange() {
+  selectedBank.value = remoteBanks.value.find(b => b.id === selectedBankId.value) || null
+  if (selectedBank.value) {
+    fetchPapers()
+  } else {
+    papers.value = []
+    total.value = 0
+  }
+}
+
+async function fetchPapers() {
+  if (!selectedBank.value) {
+    papers.value = []
+    total.value = 0
+    return
+  }
+
+  const conn = {
+    endpoint: selectedBank.value.endpoint,
+    port: selectedBank.value.port,
+    dbName: selectedBank.value.dbName
+  }
+  const q = {
+    name: filters.value.name || undefined,
+    department: filters.value.department || undefined,
+    year: filters.value.year || undefined,
+    code: filters.value.code || undefined,
+    paperId: filters.value.paperId || undefined,
+    sortBy: sortBy.value,
+    sortOrder: sortOrder.value,
+    limit: pageSize.value,
+    skip: (page.value - 1) * pageSize.value
+  }
+  try {
+    const res = await electronAPI.remoteBanks.fetchPapers(conn, q)
+    if (res && res.success) {
+      papers.value = res.papers || []
+      total.value = res.total || papers.value.length
+    } else {
+      papers.value = []
+      total.value = 0
+      const errorMsg = res?.error || '查询失败，请检查远程服务是否可用'
+      console.error('fetchPapers error', errorMsg)
+      await showAlert('查询失败：' + errorMsg)
+    }
+  } catch (e) {
+    console.error(e)
+    await showAlert('查询失败：' + (e.message || '未知错误'))
+  }
+}
+
+function prevPage() {
+  if (page.value > 1) {
+    page.value -= 1
+    fetchPapers()
+  }
+}
+
+function nextPage() {
+  if (page.value * pageSize.value < total.value) {
+    page.value += 1
+    fetchPapers()
+  }
+}
+
+// -------------------- 导入相关 --------------------
+const selectedPapers = ref([])
+const selectAll = ref(false)
+
+function toggleSelectAll() {
+  if (selectAll.value) {
+    selectedPapers.value = [...papers.value]
+  } else {
+    selectedPapers.value = []
+  }
+}
+
+const importProgressVisible = ref(false)
+const importProgressList = ref([])
+const importedCount = ref(0)
+const importFinished = ref(false)
+
+// 生成唯一文档名
+async function generateUniqueDocName(baseName, existingNamesSet) {
+  if (!existingNamesSet.has(baseName)) return baseName
+  let suffix = 1
+  let newName
+  do {
+    newName = `${baseName}_副本${suffix}`
+    suffix++
+  } while (existingNamesSet.has(newName))
+  return newName
+}
+
+// 解析 richTextContent 为 block 文本数组
+function parseRichTextToBlocks(richTextContent) {
+  if (!richTextContent) return []
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = richTextContent
+  const pElements = tempDiv.querySelectorAll('p')
+  const blocks = []
+  for (const p of pElements) {
+    let text = p.innerText || p.textContent || ''
+    text = text.trim()
+    if (text) blocks.push(text)
+  }
+  if (blocks.length === 0) {
+    const lines = richTextContent
+      .replace(/<[^>]*>/g, '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line)
+    blocks.push(...lines)
+  }
+  return blocks
+}
+
+// 校验年份格式
+function isValidYear(year) {
+  if (!year) return false
+  const yearStr = String(year).trim()
+  const yearNum = parseInt(yearStr, 10)
+  if (isNaN(yearNum)) return false
+  if (yearStr.length !== 4) return false
+  if (yearNum < 1900 || yearNum > new Date().getFullYear() + 5) return false
+  return true
+}
+
+// 导入单份试卷
+async function importOnePaper(paper, connection, existingNamesSet, validCollegesSet, courseNameToCodeMap) {
+  let finalName = paper.name
+  const warnings = []
+
+  // 1. 同名检查
+  if (existingNamesSet.has(paper.name)) {
+    const ok = await showConfirm(`试卷 ${paper.name} 已存在，是否继续导入并自动重命名？`)
+    if (!ok) {
+      return { success: false, message: '用户取消导入', name: paper.name, warnings: [] }
+    }
+    finalName = await generateUniqueDocName(paper.name, existingNamesSet)
+  }
+
+  // 2. 年份校验
+  let examYear = paper.year ? String(paper.year).trim() : null
+  if (examYear && !isValidYear(examYear)) {
+    warnings.push(`年份 ${examYear} 不合法，已清空`)
+    examYear = null
+  }
+
+  // 3. 学院校验（本地学院名称）
+  let examCollege = paper.department ? paper.department.trim() : null
+  if (examCollege && !validCollegesSet.has(examCollege)) {
+    warnings.push(`学院 ${examCollege} 不在本地学院列表中，已清空`)
+    examCollege = null
+  }
+
+  // 4. 学科代码校验（根据远程的 department 查找本地课程名称对应的代码）
+  let subjectCode = null
+  const remoteDept = paper.department ? paper.department.trim() : ''
+  if (remoteDept && courseNameToCodeMap.has(remoteDept)) {
+    subjectCode = courseNameToCodeMap.get(remoteDept)
+  } else if (remoteDept) {
+    warnings.push(`学科 ${remoteDept} 无法匹配到本地学科代码，已清空`)
+    subjectCode = null
+  }
+
+  // 5. 获取远程题目列表
+  let questionsData
+  try {
+    questionsData = await electronAPI.remoteBanks.fetchQuestions(connection, paper.paperId)
+    if (!questionsData || !questionsData.length) {
+      return { success: false, message: '该试卷无题目数据', name: paper.name, warnings }
+    }
+  } catch (err) {
+    return { success: false, message: `获取题目失败: ${err.message}`, name: paper.name, warnings }
+  }
+
+  // 6. 构建 blocks 和 questions
+  let nextBlockId = 1
+  const blocks = []
+  const localQuestions = []
+
+  for (const q of questionsData) {
+    const blockTexts = parseRichTextToBlocks(q.richTextContent)
+    if (blockTexts.length === 0) continue
+
+    const indices = []
+    for (const text of blockTexts) {
+      const blockId = nextBlockId++
+      blocks.push({ id: blockId, text })
+      indices.push(blockId)
+    }
+
+    const title = blockTexts[0]?.substring(0, 50) || '未命名题目'
+
+    localQuestions.push({
+      title,
+      indices,
+      type: q.type || '',
+      score: Number(q.score) || 0,
+      tag1: '',
+      tag2: '',
+      tag3: ''
+    })
+  }
+
+  if (localQuestions.length === 0) {
+    return { success: false, message: '解析后无有效题目（可能全是空段落）', name: paper.name, warnings }
+  }
+
+  // 7. 保存文档
+  const docData = {
+    projectName: null,
+    fileName: finalName,
+    blocks: blocks,
+    questions: localQuestions,
+    subjectCode: subjectCode || '',
+    localFilePath: null,
+    examYear: examYear,
+    examCollege: examCollege
+  }
+
+  try {
+    await window.documentAPI.save(docData)
+    existingNamesSet.add(finalName)
+    // 成功消息不包含警告（警告单独显示）
+    const message = `导入成功，最终名称：${finalName}`
+    return { success: true, message, name: paper.name, warnings }
+  } catch (err) {
+    return { success: false, message: `保存失败: ${err.message}`, name: paper.name, warnings }
+  }
+}
+
+// 开始导入
+async function startImport() {
+  if (selectedPapers.value.length === 0) return
+  if (!selectedBank.value) {
+    await showAlert('请先选择远程题库')
+    return
+  }
+
+  const connection = {
+    endpoint: selectedBank.value.endpoint,
+    port: selectedBank.value.port,
+    dbName: selectedBank.value.dbName || 'examSystem'
+  }
+
+  // 获取本地所有文档名
+  let allDocs = []
+  try {
+    allDocs = await window.documentAPI.listAll()
+  } catch (err) {
+    await showAlert('获取本地文档列表失败：' + err.message)
+    return
+  }
+  const existingNamesSet = new Set(allDocs.map(d => d.name))
+
+  // 获取本地所有合法学院名
+  let validCollegesSet = new Set()
+  try {
+    const colleges = await window.collegeAPI?.listAll?.() || []
+    validCollegesSet = new Set(colleges.map(c => c.name))
+  } catch (err) {
+    console.warn('获取学院列表失败，将跳过学院校验', err)
+  }
+
+  // 获取本地课程列表（用于学科名称→代码映射）
+  let courseNameToCodeMap = new Map()
+  try {
+    const courses = await window.courseAPI?.listAll?.() || []
+    for (const course of courses) {
+      if (course.name && course.code) {
+        courseNameToCodeMap.set(course.name, course.code)
+      }
+    }
+  } catch (err) {
+    console.warn('获取课程列表失败，将跳过学科代码校验', err)
+  }
+
+  importProgressList.value = selectedPapers.value.map(p => ({
+    paperId: p.paperId,
+    name: p.name,
+    status: 'pending',
+    message: '等待导入...',
+    warnings: []
+  }))
+  importedCount.value = 0
+  importFinished.value = false
+  importProgressVisible.value = true
+
+  for (let i = 0; i < selectedPapers.value.length; i++) {
+    const paper = selectedPapers.value[i]
+    const result = await importOnePaper(paper, connection, existingNamesSet, validCollegesSet, courseNameToCodeMap)
+    importProgressList.value[i].status = result.success ? 'success' : 'error'
+    importProgressList.value[i].message = result.message
+    importProgressList.value[i].warnings = result.warnings || []
+    importedCount.value = i + 1
+  }
+  importFinished.value = true
+}
+
+function closeImportDialog() {
+  importProgressVisible.value = false
+}
+
+onMounted(async () => {
+  await loadBanks()
+  if (selectedBankId.value) onBankChange()
+})
+</script>
+
+<style scoped>
+</style>

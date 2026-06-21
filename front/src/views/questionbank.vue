@@ -1,0 +1,1236 @@
+<template>
+  <div class="min-h-screen w-full bg-gray-50 flex overflow-hidden">
+    <!-- 侧边栏 -->
+    <aside
+      :class="[
+        'fixed inset-y-0 left-0 bg-white shadow-lg z-40 transition-all duration-300 ease-in-out flex flex-col',
+        isCollapsed ? 'w-16' : 'w-64'
+      ]"
+    >
+      <div class="p-4 border-b border-gray-200 flex items-center h-16 shrink-0" :class="isCollapsed ? 'justify-center' : 'justify-between'">
+        <div class="flex items-center overflow-hidden" v-show="!isCollapsed">
+          <img src="../assets/images/logo.png" alt=" " class="h-8 w-8 flex-shrink-0">
+          <span class="ml-2 font-bold text-blue-800 whitespace-nowrap">命题校验系统</span>
+        </div>
+        <button
+          @click="toggleSidebar"
+          class="p-2 rounded-md hover:bg-blue-50 focus:outline-none transition-colors duration-200 text-gray-600 hover:text-blue-600"
+          :title="isCollapsed ? '展开菜单' : '收起菜单'"
+        >
+          <svg v-if="isCollapsed" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          </svg>
+        </button>
+      </div>
+
+      <nav class="mt-4 px-2 overflow-y-auto flex-1">
+        <ul class="space-y-1">
+          <li v-for="item in menuItems" :key="item.id">
+            <a
+              href="#"
+              @click.prevent="navigateTo(item.id)"
+              :title="isCollapsed ? item.name : ''"
+              :class="[
+                'flex items-center rounded-md hover:bg-blue-50 text-gray-700 hover:text-blue-800 transition-colors duration-200',
+                isCollapsed ? 'justify-center p-2' : 'p-2 px-3',
+                { 'bg-blue-100 text-blue-800': isActive(item.id) }
+              ]"
+            >
+              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" :class="isCollapsed ? '' : 'mr-3'" />
+              <span v-show="!isCollapsed" class="whitespace-nowrap">{{ item.name }}</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <!-- 右侧主区域 -->
+    <div
+      class="flex-1 flex flex-col transition-all duration-300 ease-in-out"
+      :class="isCollapsed ? 'ml-16' : 'ml-64'"
+    >
+      <!-- 头部 -->
+      <header class="bg-white border-b border-gray-200 shadow-sm z-30 h-16 flex items-center justify-between px-6 sticky top-0">
+        <div class="text-2xl font-bold text-blue-800 shrink-0">
+          同济大学命题校验系统
+        </div>
+        <div class="flex items-center space-x-4">
+          <span class="text-gray-600 text-sm">欢迎您</span>
+          <a @click.prevent="goToProfile" class="font-medium text-blue-600 hover:text-blue-800 cursor-pointer transition-colors">
+            {{ currentUser.fullName || currentUser.employeeId }}
+          </a>
+          <button @click="logout" class="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm transition-colors">
+            退出登录
+          </button>
+        </div>
+      </header>
+
+      <main class="flex-1 bg-white overflow-auto p-6 md:p-8 flex flex-col min-w-0">
+        <!-- 顶部操作栏（扩展筛选） -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <h1 class="text-2xl font-bold text-blue-800">试卷管理</h1>
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- 名称搜索 -->
+            <input
+              v-model="searchKeyword"
+              type="text"
+              placeholder="搜索试卷名称..."
+              class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
+              autocomplete="off"
+            />
+
+            <!-- 年份筛选下拉框 -->
+            <select v-model="selectedYear" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500">
+              <option value="">全部年份</option>
+              <option v-for="y in yearOptionsForFilter" :key="y" :value="y">{{ y }}</option>
+            </select>
+
+            <!-- 学科代码筛选（带搜索建议 + 失焦校验） -->
+            <div class="relative">
+              <input
+                v-model="subjectFilterInput"
+                type="text"
+                placeholder="学科代码筛选"
+                class="px-3 py-2 border border-gray-300 rounded-lg text-sm w-36 focus:ring-2 focus:ring-blue-500"
+                autocomplete="off"
+                @input="onSubjectFilterInput"
+                @focus="showSubjectFilterSuggestions = true"
+                @blur="validateSubjectFilter"
+              />
+              <ul
+                v-if="showSubjectFilterSuggestions && filteredSubjectsForFilter.length"
+                class="absolute z-50 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-auto"
+              >
+                <li
+                  v-for="(sub, idx) in filteredSubjectsForFilter"
+                  :key="sub.code"
+                  @mousedown.prevent="selectSubjectFilter(sub)"
+                  :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-50', highlightFilterIdx === idx ? 'bg-blue-100' : '']"
+                >
+                  {{ sub.code }} - {{ sub.name }}
+                </li>
+              </ul>
+            </div>
+
+            <!-- 出题学院筛选（带搜索建议 + 失焦校验） -->
+            <div class="relative">
+              <input
+                v-model="collegeFilterInput"
+                type="text"
+                placeholder="出题学院筛选"
+                class="px-3 py-2 border border-gray-300 rounded-lg text-sm w-36 focus:ring-2 focus:ring-blue-500"
+                autocomplete="off"
+                @input="onCollegeFilterInput"
+                @focus="showCollegeFilterSuggestions = true"
+                @blur="validateCollegeFilter"
+              />
+              <ul
+                v-if="showCollegeFilterSuggestions && filteredCollegesForFilter.length"
+                class="absolute z-50 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-auto"
+              >
+                <li
+                  v-for="(col, idx) in filteredCollegesForFilter"
+                  :key="col.id"
+                  @mousedown.prevent="selectCollegeFilter(col)"
+                  :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-50', highlightCollegeIdx === idx ? 'bg-blue-100' : '']"
+                >
+                  {{ col.name }}
+                </li>
+              </ul>
+            </div>
+
+            <!-- 清空筛选按钮 -->
+            <button @click="clearFilters" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm">清空</button>
+            
+            <!-- 排序选择 -->
+            <div class="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+              <label class="text-xs text-gray-600 whitespace-nowrap">排序：</label>
+              <select v-model="sortBy" class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+                <option value="time">时间</option>
+                <option value="name">名称</option>
+              </select>
+              <button
+                @click="toggleSortOrder"
+                class="p-1 text-gray-600 hover:text-blue-600 transition-colors"
+                :title="sortOrder === 'asc' ? '升序' : '降序'"
+              >
+                <svg v-if="sortOrder === 'asc'" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+
+            <button @click="refreshFileList" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+              刷新列表
+            </button>
+            <button @click="goToUpload" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
+              上传新试卷
+            </button>
+            <button @click="goToRemotePapers" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm">
+              试卷导入
+            </button>
+          </div>
+        </div>
+
+        <!-- 试卷列表状态 -->
+        <div v-if="loading" class="flex-1 flex items-center justify-center text-gray-400">正在加载试卷列表...</div>
+        <div v-else-if="filteredFiles.length === 0 && allFiles.length > 0" class="flex-1 flex items-center justify-center text-gray-400">没有匹配的试卷</div>
+        <div v-else-if="allFiles.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400">
+          <p>暂无任何试卷</p>
+          <router-link to="/new-task" class="mt-2 text-blue-600 underline">去新建任务上传试卷</router-link>
+        </div>
+
+        <!-- 试卷卡片列表 -->
+        <div v-else class="space-y-4 flex-1">
+          <div v-for="file in filteredFiles" :key="file.id" class="bg-gray-50 border border-gray-200 rounded-xl shadow-sm p-5">
+            <div class="flex justify-between items-start">
+              <div class="flex-1">
+                <div class="flex items-center gap-3 flex-wrap">
+                  <router-link
+                    :to="{ path: '/edit-exam', query: { docId: file.id, source: 'question-bank' } }"
+                    class="text-lg font-semibold text-blue-700 hover:underline"
+                  >
+                    {{ file.name }}
+                  </router-link>
+                  <span class="text-xs bg-gray-200 px-2 py-0.5 rounded-full text-gray-600">学科：{{ getSubjectDisplay(file.subjectCode) }}</span>
+                  <span v-if="file.examYear" class="text-xs bg-blue-100 px-2 py-0.5 rounded-full text-blue-700">年份：{{ file.examYear }}</span>
+                  <span v-if="file.examCollege" class="text-xs bg-purple-100 px-2 py-0.5 rounded-full text-purple-700">学院：{{ file.examCollege }}</span>
+                </div>
+                <div class="text-sm text-gray-500 mt-1">上传时间：{{ formatTime(file.createTime) }}</div>
+                <div class="flex gap-3 mt-1 text-xs">
+                  <span :class="file.hasFormatCheck ? 'text-green-600' : 'text-gray-400'">
+                    📋 格式校验: {{ file.hasFormatCheck ? '已校验' : '未校验' }}
+                  </span>
+                  <span :class="file.parsed ? 'text-green-600' : 'text-gray-400'">
+                    📝 试题解析: {{ file.parsed ? '已解析' : '未解析' }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- 按钮区域 -->
+              <div class="flex flex-col gap-2 ml-4">
+                <div class="flex gap-2 flex-wrap justify-end">
+                  <!-- 查看原文件 -->
+                  <button
+                    @click="openLocalFile(file)"
+                    :disabled="!file.localFilePath"
+                    :title="file.localFilePath ? '打开本地备份试卷' : '无本地备份试卷'"
+                    :class="[
+                      'px-3 py-1.5 rounded-md text-sm transition-colors duration-200',
+                      file.localFilePath
+                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                    ]"
+                  >
+                    查看原文件
+                  </button>
+
+                  <!-- 格式解析 -->
+                  <button
+                    @click="triggerFormatValidation(file)"
+                    :disabled="!file.localFilePath"
+                    :title="file.localFilePath 
+                      ? (file.hasFormatCheck ? '重新进行格式校验' : '进行格式校验') 
+                      : '无本地备份试卷，无法进行格式校验'"
+                    :class="[
+                      'px-3 py-1.5 rounded-md text-sm transition-colors duration-200',
+                      file.localFilePath
+                        ? (file.hasFormatCheck 
+                            ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' 
+                            : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200')
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    ]"
+                  >
+                    {{ file.hasFormatCheck ? '重新进行格式解析' : '格式解析' }}
+                  </button>
+
+                  <!-- 修改信息 -->
+                  <button @click="startEdit(file)" class="px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-md hover:bg-yellow-200 text-sm">修改信息</button>
+                </div>
+                <div class="flex gap-2 flex-wrap justify-end">
+                  <!-- 查看格式校验结果 -->
+                  <button
+                    @click="viewFormatCheckResult(file)"
+                    :disabled="!file.hasFormatCheck"
+                    :title="file.hasFormatCheck ? '查看格式校验结果' : '暂无格式校验信息，请先进行格式解析'"
+                    :class="[
+                      'px-3 py-1.5 rounded-md text-sm transition-colors duration-200',
+                      file.hasFormatCheck
+                        ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-70'
+                    ]"
+                  >
+                    查看格式校验结果
+                  </button>
+
+                  <!-- 删除 -->
+                  <button @click="deleteFile(file.id)" class="px-3 py-1.5 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm">删除</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 编辑表单（扩展年份、学院） -->
+            <div v-if="editingFileId === file.id" class="border-t border-gray-200 mt-4 pt-4 space-y-4 bg-yellow-50/30 -m-5 p-5 rounded-b-xl">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">试卷名称</label>
+                  <input
+                    v-model="editForm.fileName"
+                    type="text"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="请输入新名称"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">学科代码</label>
+                  <div class="relative">
+                    <input
+                      v-model="editForm.subjectCode"
+                      @input="onSubjectInput"
+                      type="text"
+                      class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      :class="subjectCodeError ? 'border-red-500' : 'border-gray-300'"
+                      @focus="showSuggestions = true"
+                      @blur="hideSuggestions"
+                      autocomplete="off"
+                      placeholder="请输入学科名称或代码搜索"
+                    />
+                    <ul v-if="showSuggestions && filteredSubjects.length > 0" class="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      <li
+                        v-for="(subject, index) in filteredSubjects"
+                        :key="subject.code"
+                        @mousedown.prevent="selectSubject(subject)"
+                        :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-50', highlightedIndex === index ? 'bg-blue-100 text-blue-800' : 'text-gray-700']"
+                      >
+                        {{ subject.code }} {{ subject.name }}
+                      </li>
+                    </ul>
+                  </div>
+                  <p v-if="subjectCodeError" class="text-xs text-red-500 mt-1">{{ subjectCodeError }}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">试卷年份</label>
+                  <select v-model="editForm.examYear" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="">未设置</option>
+                    <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">出题学院</label>
+                  <div class="relative">
+                    <input
+                      v-model="editForm.examCollege"
+                      type="text"
+                      @input="onCollegeEditInput"
+                      @focus="showCollegeEditSuggestions = true"
+                      @blur="hideCollegeEditSuggestions"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      :class="collegeEditError ? 'border-red-500' : 'border-gray-300'"
+                      autocomplete="off"
+                      placeholder="请输入学院名称"
+                    />
+                    <ul v-if="showCollegeEditSuggestions && filteredCollegesEdit.length" class="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      <li
+                        v-for="(col, idx) in filteredCollegesEdit"
+                        :key="col.id"
+                        @mousedown.prevent="selectCollegeEdit(col)"
+                        :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-50', highlightEditCollegeIdx === idx ? 'bg-blue-100' : '']"
+                      >
+                        {{ col.name }}
+                      </li>
+                    </ul>
+                  </div>
+                  <p v-if="collegeEditError" class="text-xs text-red-500 mt-1">{{ collegeEditError }}</p>
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button @click="cancelEdit" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">取消</button>
+                <button @click="saveFileEdit(file.id)" :disabled="!!subjectCodeError || !!collegeEditError || isLoadingSubjects" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">保存修改</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    
+
+    <!-- 自定义对话框（z-index 提升至 250） -->
+    <div v-if="dialogVisible" class="fixed inset-0 z-[250] flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-2">{{ dialogTitle }}</h3>
+        <p class="text-sm text-gray-700 mb-6 whitespace-pre-wrap">{{ dialogMessage }}</p>
+        <div class="flex justify-end gap-3">
+          <button
+            v-if="dialogType === 'confirm'"
+            @click="handleDialogCancel"
+            class="px-4 py-2 text-sm rounded-md bg-gray-200 hover:bg-gray-300"
+          >
+            取消
+          </button>
+          <button
+            @click="handleDialogConfirm"
+            class="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700"
+          >
+            {{ dialogType === 'alert' ? '确定' : '确认' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 格式校验结果模态框 -->
+    <div v-if="showFormatCheckModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-auto shadow-2xl">
+        <h3 class="text-lg font-bold mb-2">格式校验结果 - {{ formatCheckFileName }}</h3>
+        <p v-if="formatCheckTime" class="text-sm text-gray-500 mb-4">校验时间：{{ formatCheckTime }}</p>
+        <div v-if="formatCheckResults.length === 0" class="text-gray-500 text-center py-8">
+          该试卷尚未进行格式校验，请点击“格式解析”按钮进行校验。
+        </div>
+        <div v-else class="space-y-3">
+          <div
+            v-for="item in formatCheckResults"
+            :key="item.code"
+            class="border rounded-lg p-3"
+            :class="item.passed ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'"
+          >
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="font-medium flex items-center gap-2">
+                  <span>{{ item.name }}</span>
+                  <span
+                    :class="item.passed ? 'text-green-600' : 'text-red-600'"
+                    class="text-xs font-normal"
+                  >
+                    {{ item.passed ? '✅ 通过' : '❌ 未通过' }}
+                  </span>
+                </div>
+                <div v-if="item.reason" class="text-sm text-gray-600 mt-1">{{ item.reason }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-6 flex justify-end">
+          <button @click="closeFormatCheckModal" class="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 格式解析进行中的加载弹窗 -->
+    <div v-if="formatValidationLoading" class="fixed inset-0 z-[200] flex items-center justify-center bg-black bg-opacity-50">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200 flex flex-col items-center">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+        <p class="text-gray-700 text-center">正在执行格式校验...</p>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, h, onMounted, computed, reactive, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+
+defineOptions({ name: 'QuestionBank' })
+
+// -------------------- 自定义弹窗 --------------------
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const dialogMessage = ref('')
+const dialogType = ref<'alert' | 'confirm'>('alert')
+let dialogResolve: ((value: boolean) => void) | null = null
+
+const showAlert = (message: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '提示'
+    dialogMessage.value = message
+    dialogType.value = 'alert'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const showConfirm = (message: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '确认'
+    dialogMessage.value = message
+    dialogType.value = 'confirm'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const handleDialogConfirm = () => {
+  dialogVisible.value = false
+  dialogResolve?.(true)
+}
+
+const handleDialogCancel = () => {
+  dialogVisible.value = false
+  dialogResolve?.(false)
+}
+
+// -------------------- 侧边栏 --------------------
+const isCollapsed = ref(true)
+const toggleSidebar = () => isCollapsed.value = !isCollapsed.value
+
+// 用户信息
+const currentUser = ref({ fullName: '', employeeId: '' })
+const router = useRouter()
+const route = useRoute()
+
+const goToProfile = () => router.push('/profile')
+const logout = () => {
+  localStorage.removeItem('currentUser')
+  router.push('/login')
+}
+
+const goToRemotePapers = () => {
+  router.push('/remote-papers')
+}
+
+const menuItems = [
+  { id: 'home', name: '主页', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' })
+  ]) },
+  { id: 'history', name: '历史项目', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' })
+  ]) },
+  { id: 'question-bank', name: '试卷管理', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' })
+  ]) },
+  { id: 'settings', name: '设置', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' }),
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z' })
+  ]) }
+]
+
+const routeMap = {
+  home: { name: 'Menu', path: '/menu' },
+  'new-task': { name: 'newtask', path: '/new-task' },
+  history: { name: 'history', path: '/history' },
+  'question-bank': { name: 'question-bank', path: '/question-bank' },
+  settings: { name: 'Settings', path: '/settings' }
+}
+
+const navigateTo = (page: string) => {
+  const target = routeMap[page as keyof typeof routeMap]
+  if (!target) return
+  if (target.name) {
+    router.push({ name: target.name }).catch(err => { if (err.name !== 'NavigationDuplicated') console.error(err) })
+  } else if (target.path) {
+    router.push(target.path).catch(err => { if (err.name !== 'NavigationDuplicated') console.error(err) })
+  }
+}
+
+const isActive = (id: string): boolean => {
+  const target = routeMap[id as keyof typeof routeMap]
+  if (!target) return false
+  if (id === 'home') return route.path === '/' || route.name === 'Menu'
+  return target.name ? route.name === target.name : route.path === target.path
+}
+
+// -------------------- 文件列表 & 筛选数据 --------------------
+const loading = ref(true)
+const allFiles = ref<any[]>([])
+const searchKeyword = ref('')
+const sortBy = ref<'name' | 'time'>('time')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+const toggleSortOrder = () => sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+
+// 筛选条件
+const selectedYear = ref('')
+const subjectFilterInput = ref('')
+const collegeFilterInput = ref('')
+const selectedSubjectFilter = ref<{ code: string } | null>(null)
+const selectedCollegeFilter = ref<{ id: number; name: string } | null>(null)
+
+// 学科数据（用于筛选建议）
+const allSubjects = ref<any[]>([])
+const filteredSubjectsForFilter = ref<any[]>([])
+const showSubjectFilterSuggestions = ref(false)
+const highlightFilterIdx = ref(-1)
+let subjectFilterTimer: any = null
+
+// 学院数据（用于筛选建议）
+const allColleges = ref<any[]>([])
+const filteredCollegesForFilter = ref<any[]>([])
+const showCollegeFilterSuggestions = ref(false)
+const highlightCollegeIdx = ref(-1)
+let collegeFilterTimer: any = null
+
+// 年份选项
+const yearOptionsForFilter = computed(() => {
+  const yearsSet = new Set<string>()
+  allFiles.value.forEach(file => {
+    if (file.examYear) {
+      yearsSet.add(file.examYear.toString())
+    }
+  })
+  return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a))
+})
+
+const onSubjectFilterInput = () => {
+  const kw = subjectFilterInput.value.trim()
+  if (!kw) {
+    filteredSubjectsForFilter.value = []
+    selectedSubjectFilter.value = null
+    showSubjectFilterSuggestions.value = false
+    return
+  }
+  if (subjectFilterTimer) clearTimeout(subjectFilterTimer)
+  subjectFilterTimer = setTimeout(() => {
+    filteredSubjectsForFilter.value = allSubjects.value.filter(s => s.code.includes(kw) || s.name.includes(kw))
+    showSubjectFilterSuggestions.value = true
+  }, 200)
+}
+
+const selectSubjectFilter = (sub: any) => {
+  subjectFilterInput.value = sub.code
+  selectedSubjectFilter.value = sub
+  filteredSubjectsForFilter.value = []
+  showSubjectFilterSuggestions.value = false
+}
+
+const validateSubjectFilter = () => {
+  setTimeout(async () => {
+    const input = subjectFilterInput.value.trim()
+    if (!input) {
+      selectedSubjectFilter.value = null
+      filteredSubjectsForFilter.value = []
+      showSubjectFilterSuggestions.value = false
+      return
+    }
+    const valid = allSubjects.value.some(s => s.code === input)
+    if (!valid) {
+      subjectFilterInput.value = ''
+      selectedSubjectFilter.value = null
+      filteredSubjectsForFilter.value = []
+      showSubjectFilterSuggestions.value = false
+      if (input) await showAlert('学科代码不存在，已清空筛选')
+    } else {
+      if (!selectedSubjectFilter.value || selectedSubjectFilter.value.code !== input) {
+        const match = allSubjects.value.find(s => s.code === input)
+        if (match) selectedSubjectFilter.value = match
+      }
+      showSubjectFilterSuggestions.value = false
+    }
+  }, 200)
+}
+
+const onCollegeFilterInput = () => {
+  const kw = collegeFilterInput.value.trim()
+  if (!kw) {
+    filteredCollegesForFilter.value = []
+    selectedCollegeFilter.value = null
+    showCollegeFilterSuggestions.value = false
+    return
+  }
+  if (collegeFilterTimer) clearTimeout(collegeFilterTimer)
+  collegeFilterTimer = setTimeout(() => {
+    filteredCollegesForFilter.value = allColleges.value.filter(c => c.name.includes(kw))
+    showCollegeFilterSuggestions.value = true
+  }, 200)
+}
+
+const selectCollegeFilter = (col: any) => {
+  collegeFilterInput.value = col.name
+  selectedCollegeFilter.value = col
+  filteredCollegesForFilter.value = []
+  showCollegeFilterSuggestions.value = false
+}
+
+const validateCollegeFilter = () => {
+  setTimeout(async () => {
+    const input = collegeFilterInput.value.trim()
+    if (!input) {
+      selectedCollegeFilter.value = null
+      filteredCollegesForFilter.value = []
+      showCollegeFilterSuggestions.value = false
+      return
+    }
+    const valid = allColleges.value.some(c => c.name === input)
+    if (!valid) {
+      collegeFilterInput.value = ''
+      selectedCollegeFilter.value = null
+      filteredCollegesForFilter.value = []
+      showCollegeFilterSuggestions.value = false
+      if (input) await showAlert('学院不存在，已清空筛选')
+    } else {
+      if (!selectedCollegeFilter.value || selectedCollegeFilter.value.name !== input) {
+        const match = allColleges.value.find(c => c.name === input)
+        if (match) selectedCollegeFilter.value = match
+      }
+      showCollegeFilterSuggestions.value = false
+    }
+  }, 200)
+}
+
+// 清空筛选：文件名、学科、出题学院
+const clearFilters = () => {
+  searchKeyword.value = ''
+  subjectFilterInput.value = ''
+  collegeFilterInput.value = ''
+  selectedSubjectFilter.value = null
+  selectedCollegeFilter.value = null
+  filteredSubjectsForFilter.value = []
+  filteredCollegesForFilter.value = []
+  showSubjectFilterSuggestions.value = false
+  showCollegeFilterSuggestions.value = false
+}
+
+const filteredFiles = computed(() => {
+  let list = allFiles.value
+  if (searchKeyword.value.trim()) {
+    const kw = searchKeyword.value.trim().toLowerCase()
+    list = list.filter(f => f.name.toLowerCase().includes(kw))
+  }
+  if (selectedYear.value) {
+    list = list.filter(f => f.examYear === selectedYear.value)
+  }
+  if (selectedSubjectFilter.value) {
+    list = list.filter(f => f.subjectCode === selectedSubjectFilter.value?.code)
+  }
+  if (selectedCollegeFilter.value) {
+    list = list.filter(f => f.examCollege === selectedCollegeFilter.value?.name)
+  }
+  if (sortBy.value === 'name') {
+    list.sort((a, b) => {
+      const nameA = a.name.toLowerCase()
+      const nameB = b.name.toLowerCase()
+      if (nameA < nameB) return sortOrder.value === 'asc' ? -1 : 1
+      if (nameA > nameB) return sortOrder.value === 'asc' ? 1 : -1
+      return 0
+    })
+  } else {
+    list.sort((a, b) => {
+      const timeA = new Date(a.createTime).getTime()
+      const timeB = new Date(b.createTime).getTime()
+      return sortOrder.value === 'asc' ? timeA - timeB : timeB - timeA
+    })
+  }
+  return list
+})
+
+const appSettings = ref<any>(null)
+const fetchSettings = async () => {
+  try {
+    appSettings.value = await (window as any).electronAPI.invoke('settings:get')
+  } catch (e) {
+    console.error('获取设置失败', e)
+  }
+}
+
+const refreshFileList = async () => {
+  loading.value = true
+  try {
+    const list: any[] = await (window as any).documentAPI.listAll()
+    await Promise.all(list.map(async (file) => {
+      try {
+        const results = await (window as any).electronAPI.invoke('formatcheck:getByDocId', file.id)
+        file.hasFormatCheck = results && results.length > 0
+      } catch (e) {
+        file.hasFormatCheck = false
+      }
+      if (file.parsed === undefined) file.parsed = false
+      if (file.localFilePath === undefined) file.localFilePath = null
+      if (file.examYear === undefined) file.examYear = null
+      if (file.examCollege === undefined) file.examCollege = null
+    }))
+    allFiles.value = list
+  } catch (e: any) {
+    console.error('加载文件列表失败', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadSubjectsAndColleges = async () => {
+  try {
+    allSubjects.value = await (window as any).courseAPI.listAll()
+    allColleges.value = await (window as any).electronAPI.invoke('college:listAll')
+  } catch (e) {
+    console.error('加载基础数据失败', e)
+  }
+}
+
+const getSubjectDisplay = (subjectCode: string | undefined | null) => {
+  if (!subjectCode) return '未设置'
+  const subject = allSubjects.value.find((s: any) => s.code === subjectCode)
+  return subject ? `${subject.code} ${subject.name}` : subjectCode
+}
+
+const currentYear = new Date().getFullYear()
+const yearOptions = computed(() => {
+  const years = []
+  const maxYear = currentYear + 1
+  const minYear = 1949
+  for (let y = maxYear; y >= minYear; y--) {
+    years.push(y.toString())
+  }
+  return years
+})
+
+// -------------------- 查看原文件 --------------------
+const openLocalFile = async (file: any) => {
+  if (!file.localFilePath) {
+    await showAlert('该试卷没有本地备份')
+    return
+  }
+  const result = await (window as any).electronAPI.invoke('file:open', file.localFilePath)
+  if (!result.success) {
+    await showAlert('打开试卷失败：' + result.error)
+  }
+}
+
+// -------------------- 格式解析（包含后端配置） --------------------
+const formatValidationLoading = ref(false)
+
+// 辅助函数：配置后端 API
+async function configureBackendApi(baseUrl: any, modelName: any, apiKey: any) {
+  const formData = new FormData()
+  formData.append('base_url', baseUrl)
+  formData.append('model_name', modelName)
+  formData.append('api_key', apiKey)
+  const response = await fetch('http://127.0.0.1:8000/set-config', {
+    method: 'POST',
+    body: formData
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || '配置后端失败')
+  }
+  const result = await response.json()
+  if (result.status !== 'success') {
+    throw new Error(result.message || '配置后端失败')
+  }
+}
+
+// 辅助函数：获取当前活动 API 配置
+async function getActiveApiConfig() {
+  const settings = await (window as any).electronAPI.invoke('settings:get')
+  const activeApiId = settings?.active_api_id
+  if (!activeApiId) {
+    throw new Error('请先在设置页面选择一个当前使用的 API')
+  }
+  const apiConfigs = await (window as any).electronAPI.invoke('apiconfig:list')
+  const activeApi = apiConfigs.find((api: any) => api.id === activeApiId)
+  if (!activeApi) {
+    throw new Error('当前选择的 API 配置不存在，请重新设置')
+  }
+  const baseUrl = activeApi.endpoint?.trim() || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  const modelName = activeApi.model?.trim() || 'qwen-max'
+  const apiKey = activeApi.api_key?.trim()
+  if (!apiKey) {
+    throw new Error('当前 API 配置未填写密钥，请先完善')
+  }
+  const is_local = !!activeApi.is_local
+  return { baseUrl, modelName, apiKey, is_local }
+}
+
+const triggerFormatValidation = async (file: any) => {
+  if (file.hasFormatCheck) {
+    const ok = await showConfirm(`该试卷已有格式校验结果，是否重新进行格式解析并覆盖？`)
+    if (!ok) return
+  }
+
+  if (!file.localFilePath) {
+    await showAlert('无法进行格式解析：该试卷没有本地备份，请先上传并备份试卷。')
+    return
+  }
+
+  // ----- 1. 配置后端 API -----
+  let apiConfig
+  try {
+    apiConfig = await getActiveApiConfig()
+    await configureBackendApi(apiConfig.baseUrl, apiConfig.modelName, apiConfig.apiKey)
+  } catch (err) {
+    await showAlert('配置后端 API 失败：' + (err as any).message)
+    return
+  }
+
+  // ----- 2. 获取启用的校验项 -----
+  let enabledChecks: Record<string, boolean> = {}
+  if (appSettings.value?.format_checks) {
+    for (const [code, enabled] of Object.entries(appSettings.value.format_checks)) {
+      if (enabled) enabledChecks[code] = true
+    }
+  } else {
+    enabledChecks = {
+      SUBJECT_NAME_CORRECT_FILLED: true,
+      SUBJECT_CODE_CORRECT_FILLED: true,
+      SUBJECT_NAME_AND_CODE_NOT_MATCH: true,
+      HEADER_SUBJECT_CODE_CORRECT_CONSISTENT: true,
+      PAGE_NUM_CORRECT_FILLED: false,
+      ALL_SECTIONS_MARKED_POINTS: true,
+      TOTAL_SCORE_IN_PREDETERMINED_RANGE: true,
+      SEQ_CORRECT_FILLED: true,
+      OPTIONS_NO_DUPLICATE: true
+    }
+  }
+
+  // ----- 3. 获取关联项目并检查总分一致性 -----
+  let expectedTotalScore: number | null = null
+  if (enabledChecks.TOTAL_SCORE_IN_PREDETERMINED_RANGE) {
+    try {
+      const projects = await (window as any).documentAPI.getProjectsByDocId(file.id)
+      if (projects && projects.length > 0) {
+        const scores = projects
+          .map((p: any) => p.totalScore)
+          .filter((s: any) => s !== undefined && s !== null && !isNaN(Number(s)))
+          .map((s: any) => Number(s))
+        
+        if (scores.length === 0) {
+          await showAlert('该试卷关联的项目均未设置总分，无法进行总分校验。\n请先在项目设置中填写总分。')
+          return
+        }
+        
+        const firstScore = scores[0]
+        const allSame = scores.every((s: any) => s === firstScore)
+        if (!allSame) {
+          await showAlert(`该试卷关联了多个项目且总分不一致：${scores.join(', ')}。\n请确保所有关联项目的总分一致后再进行格式校验。`)
+          return
+        }
+        expectedTotalScore = firstScore
+        console.log(`格式校验：使用项目总分 ${expectedTotalScore}`)
+      } else {
+        await showAlert('该试卷未关联任何项目，无法进行总分校验。\n请先将试卷关联到项目并设置项目总分。')
+        return
+      }
+    } catch (err: any) {
+      console.error('获取关联项目失败', err)
+      await showAlert('获取关联项目信息失败：' + err.message)
+      return
+    }
+  }
+
+  // ----- 4. 读取本地文件 -----
+  let fileBuffer: ArrayBuffer | null = null
+  try {
+    const readResult = await (window as any).electronAPI.invoke('file:read', file.localFilePath)
+    if (!readResult.success) throw new Error(readResult.error)
+    const byteCharacters = atob(readResult.data)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    fileBuffer = new Uint8Array(byteNumbers).buffer
+  } catch (e: any) {
+    await showAlert('读取本地试卷失败：' + e.message)
+    return
+  }
+
+  // ----- 5. 调用格式校验接口 -----
+  formatValidationLoading.value = true
+  let errorMessage: string | null = null
+  let successFlag = false
+  try {
+    const blob = new Blob([fileBuffer!], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+    const formData = new FormData()
+    formData.append('file', blob, file.name)
+    formData.append('format_checks', JSON.stringify(enabledChecks))
+    if (expectedTotalScore !== null) {
+      formData.append('expected_total_score', expectedTotalScore.toString())
+    }
+    // 传递是否为本地 API 标识
+    try {
+      const active = await getActiveApiConfig()
+      // 后端在 validate-format 接口中期望参数名为 is_local_api
+      formData.append('is_local_api', active.is_local ? 'true' : 'false')
+    } catch (e) {
+      // ignore, backend will validate config
+    }
+
+    const response = await fetch('http://127.0.0.1:8000/validate-format', {
+      method: 'POST',
+      body: formData
+    })
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(errText || '请求失败')
+    }
+    const data = await response.json()
+    if (!data.results) throw new Error('服务器未返回校验结果')
+
+    await (window as any).electronAPI.invoke('formatcheck:saveBatch', file.id, data.results)
+    file.hasFormatCheck = true
+    await refreshFileList()
+    successFlag = true
+  } catch (error: any) {
+    errorMessage = error.message || '未知错误'
+  } finally {
+    formatValidationLoading.value = false
+    await nextTick()
+    if (successFlag) {
+      await showAlert('格式解析完成，结果已保存。')
+    } else {
+      await showAlert('格式解析失败：' + errorMessage)
+    }
+  }
+}
+
+// -------------------- 编辑文件 --------------------
+const editingFileId = ref<number | null>(null)
+const originalFile = ref<any>(null)
+const editForm = reactive({ fileName: '', subjectCode: '', examYear: '', examCollege: '' })
+
+const filteredSubjects = ref<any[]>([])
+const showSuggestions = ref(false)
+const highlightedIndex = ref(-1)
+const isLoadingSubjects = ref(false)
+const selectedSubject = ref<any>(null)
+const subjectCodeError = ref('')
+let subjectTimer: ReturnType<typeof setTimeout> | null = null
+
+const filteredCollegesEdit = ref<any[]>([])
+const showCollegeEditSuggestions = ref(false)
+const highlightEditCollegeIdx = ref(-1)
+const collegeEditError = ref('')
+let collegeEditTimer: any = null
+
+const onCollegeEditInput = () => {
+  collegeEditError.value = ''
+  const kw = editForm.examCollege.trim()
+  if (!kw) {
+    filteredCollegesEdit.value = []
+    return
+  }
+  if (collegeEditTimer) clearTimeout(collegeEditTimer)
+  collegeEditTimer = setTimeout(() => {
+    filteredCollegesEdit.value = allColleges.value.filter(c => c.name.includes(kw))
+    showCollegeEditSuggestions.value = true
+  }, 200)
+}
+
+const selectCollegeEdit = (col: any) => {
+  editForm.examCollege = col.name
+  collegeEditError.value = ''
+  showCollegeEditSuggestions.value = false
+}
+
+const hideCollegeEditSuggestions = () => setTimeout(() => { showCollegeEditSuggestions.value = false }, 200)
+
+const onSubjectInput = () => {
+  if (subjectTimer) clearTimeout(subjectTimer)
+  const kw = editForm.subjectCode.trim()
+  if (!kw) {
+    showSuggestions.value = false
+    filteredSubjects.value = []
+    subjectCodeError.value = ''
+    selectedSubject.value = null
+    return
+  }
+  isLoadingSubjects.value = true
+  subjectTimer = setTimeout(async () => {
+    try {
+      const results: any[] = await (window as any).courseAPI.search(kw)
+      filteredSubjects.value = results
+      showSuggestions.value = results.length > 0
+      const exactMatch = results.find((s: any) => s.code === kw)
+      if (exactMatch) {
+        selectedSubject.value = exactMatch
+        subjectCodeError.value = ''
+      } else {
+        if (!results.length) subjectCodeError.value = '学科代码不存在'
+        else subjectCodeError.value = ''
+        selectedSubject.value = null
+      }
+      highlightedIndex.value = -1
+    } finally {
+      isLoadingSubjects.value = false
+    }
+  }, 300)
+}
+
+const selectSubject = (s: any) => {
+  selectedSubject.value = s
+  editForm.subjectCode = s.code
+  showSuggestions.value = false
+  subjectCodeError.value = ''
+}
+
+const hideSuggestions = () => { setTimeout(() => { showSuggestions.value = false }, 200) }
+
+const startEdit = (file: any) => {
+  editingFileId.value = file.id
+  originalFile.value = { ...file }
+  editForm.fileName = file.name
+  editForm.subjectCode = file.subjectCode || ''
+  editForm.examYear = file.examYear || ''
+  editForm.examCollege = file.examCollege || ''
+  collegeEditError.value = ''
+  if (file.subjectCode) {
+    selectedSubject.value = { code: file.subjectCode, name: '' }
+  } else {
+    selectedSubject.value = null
+  }
+  subjectCodeError.value = ''
+  showSuggestions.value = false
+  filteredSubjects.value = []
+}
+
+const cancelEdit = () => {
+  editingFileId.value = null
+  originalFile.value = null
+}
+
+const getDocumentRelatedProjects = async (docId: number): Promise<string[]> => {
+  const projects: any[] = await (window as any).projectAPI.list()
+  const related: string[] = []
+  for (const p of projects) {
+    const files = await (window as any).documentAPI.listByProject(p.name)
+    if (files.some((f: any) => f.id === docId)) {
+      related.push(p.name)
+    }
+  }
+  return related
+}
+
+const saveFileEdit = async (docId: number) => {
+  if (!editForm.fileName.trim()) {
+    await showAlert('试卷名称不能为空')
+    return
+  }
+  if (!editForm.subjectCode.trim()) {
+    await showAlert('请输入学科代码')
+    return
+  }
+  if (!selectedSubject.value || selectedSubject.value.code !== editForm.subjectCode.trim()) {
+    const results = await (window as any).courseAPI.search(editForm.subjectCode.trim())
+    const match = results.find((s: any) => s.code === editForm.subjectCode.trim())
+    if (!match) {
+      subjectCodeError.value = '无效的学科代码，请选择或输入正确的代码'
+      return
+    }
+    selectedSubject.value = match
+  }
+  subjectCodeError.value = ''
+
+  if (editForm.examCollege.trim()) {
+    const collegeExists = allColleges.value.some(c => c.name === editForm.examCollege.trim())
+    if (!collegeExists) {
+      collegeEditError.value = '学院不存在，请从下拉列表中选择有效学院'
+      await showAlert('学院不存在，请从下拉列表中选择有效学院')
+      return
+    }
+  }
+  collegeEditError.value = ''
+
+  const oldCode = originalFile.value?.subjectCode || ''
+  const newCode = editForm.subjectCode.trim()
+  if (oldCode !== newCode) {
+    const relatedProjects = await getDocumentRelatedProjects(docId)
+    if (relatedProjects.length > 0) {
+      const confirmMsg = `修改学科代码后，试卷与以下项目的关联将自动解除：\n${relatedProjects.join('、')}\n确定继续吗？`
+      const ok = await showConfirm(confirmMsg)
+      if (!ok) return
+      for (const projectName of relatedProjects) {
+        await (window as any).documentAPI.disassociate(projectName, docId)
+      }
+    }
+  }
+
+  try {
+    await (window as any).documentAPI.update(docId, {
+      name: editForm.fileName,
+      subjectCode: newCode,
+      examYear: editForm.examYear || null,
+      examCollege: editForm.examCollege || null
+    })
+    await refreshFileList()
+    cancelEdit()
+  } catch (e: any) {
+    await showAlert('保存试卷修改失败：' + e.message)
+  }
+}
+
+// -------------------- 删除文件 --------------------
+const deleteFile = async (docId: number) => {
+  const ok = await showConfirm('确认删除该试卷？此操作不可恢复，同时会移除其所有关联。')
+  if (!ok) return
+  try {
+    await (window as any).documentAPI.delete(docId)
+    await refreshFileList()
+  } catch (e: any) {
+    await showAlert('删除失败：' + e.message)
+  }
+}
+
+// 关联模态框及相关函数已从本页面移除
+
+// -------------------- 上传文件跳转 --------------------
+const goToUpload = () => {
+  router.push({ path: '/devide', query: { source: 'question-bank', from: '/question-bank' } })
+}
+
+const formatTime = (iso: string) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
+
+// 试题解析相关逻辑已从本页面移除（保留后端接口与其它页面引用）
+
+// -------------------- 格式校验结果查看 --------------------
+const showFormatCheckModal = ref(false)
+const formatCheckFileName = ref('')
+const formatCheckResults = ref<any[]>([])
+const formatCheckTime = ref('')
+
+const viewFormatCheckResult = async (file: any) => {
+  if (!file.hasFormatCheck) {
+    await showAlert('该试卷尚未进行格式校验，没有校验结果可查看。')
+    return
+  }
+  try {
+    const results = await (window as any).electronAPI.invoke('formatcheck:getByDocId', file.id)
+    formatCheckResults.value = results || []
+    formatCheckFileName.value = file.name
+    if (results && results.length > 0 && results[0].createdAt) {
+      formatCheckTime.value = new Date(results[0].createdAt).toLocaleString('zh-CN')
+    } else {
+      formatCheckTime.value = ''
+    }
+    showFormatCheckModal.value = true
+  } catch (err: any) {
+    await showAlert('获取格式校验结果失败：' + err.message)
+  }
+}
+
+const closeFormatCheckModal = () => {
+  showFormatCheckModal.value = false
+  formatCheckResults.value = []
+  formatCheckFileName.value = ''
+  formatCheckTime.value = ''
+}
+
+// -------------------- 生命周期 --------------------
+onMounted(async () => {
+  const storedUser = localStorage.getItem('currentUser')
+  if (!storedUser) {
+    router.push('/login')
+    return
+  }
+  try {
+    currentUser.value = JSON.parse(storedUser)
+  } catch (e) {
+    router.push('/login')
+    return
+  }
+  await fetchSettings()
+  await loadSubjectsAndColleges()
+  await refreshFileList()
+})
+</script>
+
+<style scoped>
+.transition-all { transition-property: all; }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+</style>

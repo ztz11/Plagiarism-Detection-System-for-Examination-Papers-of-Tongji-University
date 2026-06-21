@@ -1,0 +1,438 @@
+<template>
+  <div class="min-h-screen w-full bg-gray-50 flex overflow-hidden">
+    <!-- 侧边�?-->
+    <aside
+      :class="[
+        'fixed inset-y-0 left-0 bg-white shadow-lg z-40 transition-all duration-300 ease-in-out flex flex-col',
+        isCollapsed ? 'w-16' : 'w-64'
+      ]"
+    >
+      <div class="p-4 border-b border-gray-200 flex items-center h-16 shrink-0" :class="isCollapsed ? 'justify-center' : 'justify-between'">
+        <div class="flex items-center overflow-hidden" v-show="!isCollapsed">
+          <img src="../assets/images/logo.png" alt=" " class="h-8 w-8 flex-shrink-0">
+          <span class="ml-2 font-bold text-blue-800 whitespace-nowrap">命题校验系统</span>
+        </div>
+        <button
+          @click="toggleSidebar"
+          class="p-2 rounded-md hover:bg-blue-50 focus:outline-none transition-colors duration-200 text-gray-600 hover:text-blue-600"
+          :title="isCollapsed ? '展开菜单' : '收起菜单'"
+        >
+          <svg v-if="isCollapsed" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          </svg>
+        </button>
+      </div>
+
+      <nav class="mt-4 px-2 overflow-y-auto flex-1">
+        <ul class="space-y-1">
+          <li v-for="item in menuItems" :key="item.id">
+            <a
+              href="#"
+              @click.prevent="navigateTo(item.id)"
+              :title="isCollapsed ? item.name : ''"
+              :class="[
+                'flex items-center rounded-md hover:bg-blue-50 text-gray-700 hover:text-blue-800 transition-colors duration-200',
+                isCollapsed ? 'justify-center p-2' : 'p-2 px-3',
+                { 'bg-blue-100 text-blue-800': isActive(item.id) }
+              ]"
+            >
+              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" :class="isCollapsed ? '' : 'mr-3'" />
+              <span v-show="!isCollapsed" class="whitespace-nowrap">{{ item.name }}</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <div
+      class="flex-1 flex flex-col transition-all duration-300 ease-in-out"
+      :class="isCollapsed ? 'ml-16' : 'ml-64'"
+    >
+      <!-- 头部 -->
+      <header class="bg-white border-b border-gray-200 shadow-sm z-30 h-16 flex items-center justify-between px-6 sticky top-0">
+        <div class="text-2xl font-bold text-blue-800 shrink-0">
+          试卷智能校验系统
+        </div>
+        <div class="flex items-center space-x-4">
+          <span class="text-gray-600 text-sm">欢迎�?/span>
+          <a @click.prevent="goToProfile" class="font-medium text-blue-600 hover:text-blue-800 cursor-pointer transition-colors">
+            {{ currentUser.fullName || currentUser.employeeId }}
+          </a>
+          <button @click="logout" class="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm transition-colors">
+            退出登�?
+          </button>
+        </div>
+      </header>
+
+      <main class="flex-1 bg-white overflow-auto p-6 md:p-8 flex flex-col min-w-0">
+        <h1 class="text-2xl font-bold text-blue-800 mb-6">新建项目</h1>
+
+        <div class="max-w-3xl w-full bg-gray-50 rounded-xl shadow-sm p-6 md:p-8 border border-gray-100">
+          <form @submit.prevent="handleSubmit" class="space-y-6">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
+              <input
+                v-model="projectName"
+                type="text"
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="请输入项目名�?
+                required
+              />
+            </div>
+
+            <div class="relative">
+              <label class="block text-sm font-medium text-gray-700 mb-1">学科</label>
+              <input
+                v-model="subjectInput"
+                type="text"
+                @input="onSubjectInput"
+                @focus="onSubjectFocus"
+                @blur="onSubjectBlur"
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="输入学科名称或代码进行搜�?
+                autocomplete="off"
+                required
+              />
+              <ul
+                v-if="showSuggestions && filteredSubjects.length > 0"
+                class="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto"
+              >
+                <li
+                  v-for="(subject, index) in filteredSubjects"
+                  :key="subject.code"
+                  @mousedown.prevent="selectSubject(subject)"
+                  @mouseenter="highlightedIndex = index"
+                  :class="[
+                    'px-4 py-2 cursor-pointer transition-colors',
+                    highlightedIndex === index ? 'bg-blue-100 text-blue-800' : 'hover:bg-gray-100'
+                  ]"
+                >
+                  <span class="font-mono text-gray-500 mr-2">{{ subject.code }}</span>
+                  <span>{{ subject.name }}</span>
+                </li>
+              </ul>
+              <div v-if="isLoadingSubjects" class="absolute z-50 w-full mt-1 bg-white border p-4 text-gray-500 shadow-lg">
+                正在从数据库查询...
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">试卷总分</label>
+              <input
+                v-model.number="totalScore"
+                type="number"
+                step="0.5"
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="请输入试卷总分（数字）"
+                required
+              />
+              <p v-if="totalScoreError" class="text-xs text-red-500 mt-1">{{ totalScoreError }}</p>
+            </div>
+
+            <div v-if="selectedSubject" class="bg-blue-50 rounded-lg p-3 text-sm flex items-center">
+              <span class="font-medium text-gray-700 mr-2">已选学科：</span>
+              <span class="font-mono text-blue-800 mr-2">{{ selectedSubject.code }}</span>
+              <span class="text-gray-600">{{ selectedSubject.name }}</span>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-4 items-center">
+              <button
+                type="submit"
+                :disabled="isSubmitting || !selectedSubject || !validTotalScore"
+                class="w-full sm:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50"
+              >
+                {{ isSubmitting ? '保存�?..' : '生成项目记录' }}
+              </button>
+              <p v-if="message" class="text-sm" :class="messageType === 'error' ? 'text-red-600' : 'text-green-600'">
+                {{ message }}
+              </p>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+
+    <!-- 自定�?Vue 原生确认对话�?-->
+    <div v-if="dialogVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-2">{{ dialogTitle }}</h3>
+        <p class="text-sm text-gray-700 mb-6 whitespace-pre-wrap">{{ dialogMessage }}</p>
+        <div class="flex justify-end gap-3">
+          <button v-if="dialogType === 'confirm'" @click="handleDialogCancel" class="px-4 py-2 text-sm rounded-md bg-gray-200 hover:bg-gray-300">取消</button>
+          <button @click="handleDialogConfirm" class="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700">
+            {{ dialogType === 'confirm' ? '确认' : '确定' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, h, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+
+interface Subject {
+  code: string
+  name: string
+}
+
+// ---------- 侧边栏控�?----------
+const isCollapsed = ref(true)
+const toggleSidebar = () => isCollapsed.value = !isCollapsed.value
+
+// ---------- 用户信息 ----------
+const currentUser = ref({ fullName: '', employeeId: '' })
+const router = useRouter()
+const route = useRoute()
+
+const goToProfile = () => {
+  router.push('/profile')
+}
+
+const logout = () => {
+  localStorage.removeItem('currentUser')
+  router.push('/login')
+}
+
+// ---------- 菜单配置 ----------
+const menuItems = [
+  { 
+    id: 'home', 
+    name: '主页', 
+    icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' })
+    ])
+  },
+  { 
+    id: 'new-task', 
+    name: '新建项目', 
+    icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 6v6m0 0v6m0-6h6m-6 0H6' })
+    ])
+  },
+  { 
+    id: 'history', 
+    name: '历史任务', 
+    icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' })
+    ])
+  },
+  { 
+    id: 'question-bank', 
+    name: '题库管理', 
+    icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' })
+    ])
+  },
+  {
+    id: 'settings',
+    name: '设置',
+    icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' }),
+      h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z' })
+    ])
+  }
+]
+
+const routeMap: Record<string, string> = { 
+  home: '/menu', 
+  'new-task': '/new-task', 
+  history: '/history', 
+  'question-bank': '/question-bank',
+  devide: '/devide',
+  settings: '/settings'
+}
+
+const navigateTo = (page: string) => { 
+  const targetPath = routeMap[page]
+  if (targetPath) router.push(targetPath).catch(err => { if (err.name !== 'NavigationDuplicated') console.error(err) })
+}
+
+const isActive = (id: string): boolean => { 
+  const targetPath = routeMap[id]
+  return route.path === targetPath || (id === 'home' && route.path === '/') 
+}
+
+// ---------- Vue 原生对话框状�?----------
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const dialogMessage = ref('')
+const dialogType = ref<'alert' | 'confirm'>('alert')
+let dialogResolve: ((value: boolean) => void) | null = null
+
+const showConfirm = (message: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '确认'
+    dialogMessage.value = message
+    dialogType.value = 'confirm'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const handleDialogConfirm = () => {
+  dialogVisible.value = false
+  dialogResolve?.(true)
+}
+
+const handleDialogCancel = () => {
+  dialogVisible.value = false
+  dialogResolve?.(false)
+}
+
+// ---------- 表单�?API 逻辑 ----------
+const projectName = ref('')
+const subjectInput = ref('')
+const selectedSubject = ref<Subject | null>(null)
+const filteredSubjects = ref<Subject[]>([])
+const showSuggestions = ref(false)
+const highlightedIndex = ref(-1)
+const isLoadingSubjects = ref(false)
+const isSubmitting = ref(false)
+const message = ref('')
+const messageType = ref<'success' | 'error'>('success')
+const totalScore = ref<number | null>(null)
+const totalScoreError = ref('')
+
+const validTotalScore = computed(() => {
+  const val = totalScore.value
+  if (val === null || val === undefined) return false
+  const num = parseFloat(String(val))
+  return !isNaN(num) && num >= 0
+})
+
+const onSubjectInput = async () => {
+  const query = subjectInput.value.trim()
+  if (!query) { 
+    filteredSubjects.value = []
+    showSuggestions.value = false
+    return 
+  }
+  isLoadingSubjects.value = true
+  try {
+    if ((window as any).courseAPI) {
+      filteredSubjects.value = await (window as any).courseAPI.search(query)
+      showSuggestions.value = true
+      highlightedIndex.value = filteredSubjects.value.length > 0 ? 0 : -1
+    }
+  } catch (e) { 
+    console.error('搜索失败:', e) 
+  } finally { 
+    isLoadingSubjects.value = false 
+  }
+  selectedSubject.value = null
+}
+
+const onSubjectFocus = () => { if (subjectInput.value) onSubjectInput() }
+const onSubjectBlur = () => { setTimeout(() => { showSuggestions.value = false }, 200) }
+const selectSubject = (subject: Subject) => {
+  selectedSubject.value = subject
+  subjectInput.value = `${subject.code} - ${subject.name}`
+  showSuggestions.value = false
+}
+
+onMounted(async () => {
+  // 检查登录状�?
+  const storedUser = localStorage.getItem('currentUser')
+  if (!storedUser) {
+    router.push('/login')
+    return
+  }
+  try {
+    const user = JSON.parse(storedUser)
+    currentUser.value = user
+  } catch (e) {
+    router.push('/login')
+    return
+  }
+
+  // 从路由参数恢复项目名称和学科
+  const { projectName: qProject, subjectCode: qSubject } = route.query
+  if (qProject) {
+    projectName.value = String(qProject)
+  }
+  if (qSubject) {
+    const code = String(qSubject)
+    subjectInput.value = code
+    try {
+      if ((window as any).courseAPI) {
+        const results = await (window as any).courseAPI.search(code)
+        if (results && results.length > 0) {
+          selectSubject(results[0])
+        } else {
+          selectedSubject.value = null
+        }
+      }
+    } catch (e) {
+      console.warn('恢复学科失败:', e)
+    }
+  }
+})
+
+const handleSubmit = async () => {
+  if (!projectName.value.trim() || !selectedSubject.value) {
+    message.value = '请完善项目信息！'
+    messageType.value = 'error'
+    return
+  }
+  const score = parseFloat(String(totalScore.value))
+  if (isNaN(score) || score < 0) {
+    totalScoreError.value = '试卷总分必须为有效的非负数字'
+    message.value = '试卷总分必须为有效的非负数字'
+    messageType.value = 'error'
+    return
+  }
+  totalScoreError.value = ''
+
+  isSubmitting.value = true
+  message.value = ''
+  const currentProjectName = projectName.value.trim()
+  const currentSubjectCode = selectedSubject.value.code
+
+  try {
+    const result = await (window as any).projectAPI.save({
+      projectName: currentProjectName,
+      content: [currentProjectName, new Date().toLocaleString(), currentUser.value.fullName || currentUser.value.employeeId, currentSubjectCode].join('\n'),
+      subjectCode: currentSubjectCode,
+      userName: currentUser.value.fullName || currentUser.value.employeeId,
+      totalScore: score
+    })
+
+    if (result.success) {
+      // 使用 Vue 原生对话框询问是否立即上传试�?
+      const confirmAdd = await showConfirm(`项目�?{currentProjectName}」新建成功！\n是否立即上传并划分试卷文件？`)
+      if (confirmAdd) {
+        router.push({ path: '/devide', query: { projectName: currentProjectName, subjectCode: currentSubjectCode, from: '/new-task' } })
+      } else {
+        message.value = '项目保存成功�?
+        messageType.value = 'success'
+      }
+    } else {
+      if (result.error && result.error.includes('已存�?)) {
+        const goToExist = await showConfirm(`提示：项目�?{currentProjectName}」已存在。\n是否直接进入该文件的划分界面？`)
+        if (goToExist) {
+          router.push({ path: '/devide', query: { projectName: currentProjectName, subjectCode: currentSubjectCode, from: '/new-task' } })
+        }
+      } else {
+        message.value = `保存失败: ${result.error}`
+        messageType.value = 'error'
+      }
+    }
+  } catch (e: any) {
+    message.value = e.message || '项目名重复或总分无效！请重新输入'
+    messageType.value = 'error'
+  } finally {
+    isSubmitting.value = false
+  }
+}
+</script>
+
+<style scoped>
+.transition-all { transition-property: all; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+</style>

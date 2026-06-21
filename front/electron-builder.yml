@@ -1,0 +1,17 @@
+appId: com.example.app
+productName: ExamTest
+directories:
+  output: dist_electron
+files:
+  - dist/**/*
+  - main.js
+  - preload.js
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+linux:
+  target:
+    - AppImage

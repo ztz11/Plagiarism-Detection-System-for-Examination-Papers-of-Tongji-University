@@ -1,0 +1,69 @@
+{
+  "name": "exam_test",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "electron": "electron .",
+    "electron:build": "vue-cli-service electron:build",
+    "electron:dev": "electron .",
+    "electron:serve": "vue-cli-service electron:serve",
+    "postinstall": "electron-builder install-app-deps",
+    "postuninstall": "electron-builder install-app-deps",
+    "preview": "vite preview"
+  },
+  "main": "main.js",
+  "dependencies": {
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/typography": "^0.5.19",
+    "axios": "^1.15.2",
+    "better-sqlite3": "^12.10.0",
+    "lowdb": "^7.0.1",
+    "mongodb": "^5.9.2",
+    "vue": "^3.5.30",
+    "vue-router": "^5.0.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-vue": "^6.0.4",
+    "autoprefixer": "^10.4.27",
+    "electron": "^13.6.9",
+    "electron-builder": "^26.8.1",
+    "electron-devtools-installer": "^3.1.0",
+    "electron-rebuild": "^3.2.9",
+    "eslint-plugin-vue": "^10.9.1",
+    "postcss": "^8.5.8",
+    "postcss-pxtorem": "^6.1.0",
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.3.1",
+    "vite-plugin-electron": "^0.29.1",
+    "vite-plugin-vue-devtools": "^8.0.7",
+    "vue-cli-plugin-electron-builder": "~2.1.1"
+  },
+  "build": {
+    "appId": "com.example.app",
+    "productName": "ExamTest",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "type": "commonjs"
+}

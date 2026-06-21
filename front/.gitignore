@@ -1,0 +1,55 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.DS_Store
+dist
+dist-ssr
+coverage
+*.local
+
+# Electron-builder output (both naming conventions)
+dist-electron
+dist_electron
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+*.tsbuildinfo
+
+.eslintcache
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vitest
+__screenshots__/
+
+# Vite
+*.timestamp-*-*.mjs
+
+# ==================== 项目专用 ====================
+
+# 冗余的数据分析 / 报告文件
+complexity-frontend.json
+experiment_report.md
+
+# 旧版 / 未使用的入口文件
+src/background.js
+
+# 占位图片资源（非项目业务代码）
+src/assets/images/

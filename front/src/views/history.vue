@@ -1,0 +1,1342 @@
+<template>
+  <div class="min-h-screen w-full bg-gray-50 flex overflow-hidden">
+    <aside :class="['fixed inset-y-0 left-0 bg-white shadow-lg z-40 transition-all duration-300 flex flex-col', isCollapsed ? 'w-16' : 'w-64']">
+      <div class="p-4 border-b border-gray-200 flex items-center h-16 shrink-0" :class="isCollapsed ? 'justify-center' : 'justify-between'">
+        <div class="flex items-center overflow-hidden" v-show="!isCollapsed">
+          <span class="font-bold text-blue-800 whitespace-nowrap">命题校验系统</span>
+        </div>
+        <button @click="toggleSidebar" class="p-2 rounded-md hover:bg-blue-50 transition-colors text-gray-600 hover:text-blue-600">
+          <svg v-if="isCollapsed" class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          <svg v-else class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+        </button>
+      </div>
+      <nav class="mt-4 px-2 overflow-y-auto flex-1">
+        <ul class="space-y-1">
+          <li v-for="item in menuItems" :key="item.id">
+            <a href="#" @click.prevent="navigateTo(item.id)" :title="isCollapsed ? item.name : ''" :class="['flex items-center rounded-md hover:bg-blue-50 text-gray-700 hover:text-blue-800', isCollapsed ? 'justify-center p-2' : 'p-2 px-3', { 'bg-blue-100 text-blue-800': isActive(item.id) }]">
+              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" :class="isCollapsed ? '' : 'mr-3'" />
+              <span v-show="!isCollapsed" class="whitespace-nowrap">{{ item.name }}</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <div class="flex-1 flex flex-col transition-all duration-300" :class="isCollapsed ? 'ml-16' : 'ml-64'">
+      <header class="bg-white border-b border-gray-200 shadow-sm z-30 h-16 flex items-center justify-between px-6 sticky top-0">
+        <div class="text-2xl font-bold text-blue-800">试卷智能校验系统</div>
+        <div class="flex items-center space-x-4">
+          <span class="text-gray-600 text-sm">欢迎您</span>
+          <a @click.prevent="goToProfile" class="font-medium text-blue-600 hover:text-blue-800 cursor-pointer transition-colors">
+            {{ currentUser.fullName || currentUser.employeeId }}
+          </a>
+          <button @click="logout" class="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm transition-colors">
+            退出登录
+          </button>
+        </div>
+      </header>
+
+      <main class="flex-1 bg-white overflow-auto p-6 md:p-8 flex flex-col min-w-0">
+        <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
+          <h1 class="text-2xl font-bold text-blue-800">历史项目</h1>
+          <div class="flex gap-3 items-center flex-wrap">
+            <div class="flex items-center gap-2">
+              <input
+                v-model="searchKeyword"
+                type="text"
+                placeholder="搜索项目名称..."
+                class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm w-56"
+                autocomplete="off"
+              />
+              <button @click="searchKeyword = ''" class="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 text-sm">清空</button>
+            </div>
+            <div class="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+              <label class="text-xs text-gray-600 whitespace-nowrap">排序：</label>
+              <select v-model="sortBy" class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+                <option value="time">时间</option>
+                <option value="name">名称</option>
+              </select>
+              <button @click="toggleSortOrder" class="p-1 text-gray-600 hover:text-blue-600 transition-colors" :title="sortOrder === 'asc' ? '升序' : '降序'">
+                <svg v-if="sortOrder === 'asc'" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+                <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+            </div>
+            <button @click="goToNewTask" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">新建项目</button>
+            <button @click="refreshList" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">刷新列表</button>
+          </div>
+        </div>
+
+        <div v-if="loading" class="flex-1 flex items-center justify-center text-gray-400">正在加载项目列表...</div>
+        <div v-else-if="sortedProjects.length === 0 && projects.length > 0" class="flex-1 flex items-center justify-center text-gray-400">没有匹配的项目</div>
+        <div v-else-if="projects.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400">
+          <p>暂无历史项目</p>
+          <router-link to="/new-task" class="mt-2 text-blue-600 underline">去新建项目</router-link>
+        </div>
+
+        <div v-else class="space-y-4 flex-1">
+          <div v-for="project in sortedProjects" :key="project.name" class="bg-gray-50 border border-gray-200 rounded-xl shadow-sm">
+            <div class="p-5 cursor-pointer flex justify-between items-start" @click="toggleProjectExpand(project.name)">
+              <div class="flex-1">
+                <h3 class="text-lg font-semibold text-gray-800 mb-1">{{ project.name }}</h3>
+                <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500">
+                  <span>学科：{{ getSubjectDisplay(project.subjectCode) }}</span>
+                  <span>试卷总分：{{ project.totalScore !== undefined ? project.totalScore : '—' }}</span>
+                  <span>创建时间：{{ formatTime(project.createTime) }}</span>
+                  <span>状态：{{ getProjectStatus(project.name) }}</span>
+                </div>
+              </div>
+              <div class="flex gap-2 ml-4" @click.stop>
+                <button @click="startEdit(project)" class="px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-md hover:bg-yellow-200 text-sm">修改</button>
+                <button @click="startGenerateReport(project.name)" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-md hover:bg-indigo-200 text-sm">生成报告</button>
+                <button @click="viewReport(project.name)" :disabled="!reportStatus[project.name]" :class="['px-3 py-1.5 rounded-md text-sm', reportStatus[project.name] ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed']">查看报告</button>
+                <button @click="deleteProject(project.name)" class="px-3 py-1.5 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm">删除</button>
+              </div>
+              <span class="ml-2 text-gray-400 text-xl">{{ expandedProject === project.name ? '▼' : '▶' }}</span>
+            </div>
+
+            <div v-if="expandedProject === project.name" class="border-t border-gray-200 px-5 pb-5 pt-4">
+              <div class="flex gap-3 mb-4">
+                <button @click="openAddFileModal(project)" class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium">➕ 添加已有试卷</button>
+                <button @click="uploadFileForProject(project.name)" class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 text-sm font-medium">📤 上传新试卷</button>
+              </div>
+              <div v-if="documentsLoading" class="text-sm text-gray-400 py-2">加载中…</div>
+              <ul v-else-if="projectFiles.length > 0" class="space-y-2">
+                <li v-for="doc in projectFiles" :key="doc.id" class="flex justify-between items-center bg-white border rounded-lg p-3 text-sm">
+                  <div class="flex-1">
+                    <router-link :to="{ path: '/edit-exam', query: { docId: doc.id, source: 'history' } }" class="font-medium text-blue-700 hover:underline" @click.stop>{{ doc.name }}</router-link>
+                    <div class="text-xs text-gray-400 mt-1 flex gap-x-4">
+                      <span>学科：{{ getSubjectDisplay(doc.subjectCode) }}</span>
+                      <span>上传时间：{{ formatTime(doc.createTime) }}</span>
+                      <span>状态：{{ docStatusLabel(doc.status) }}</span>
+                      <span :class="doc.parsed ? 'text-green-600' : 'text-gray-400'">{{ doc.parsed ? '已解析' : '未解析' }}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3 ml-4">
+                    <button v-if="project.mainDocId === doc.id" @click="setMainFile(project.name, null)" class="text-yellow-600 hover:text-yellow-800 text-xs font-medium">★ 主试卷</button>
+                    <button v-else @click="setMainFile(project.name, doc.id)" class="text-gray-400 hover:text-yellow-600 text-xs">☆ 设为主试卷</button>
+                    <button @click="removeFileFromProject(project.name, doc)" class="text-red-500 hover:text-red-700 text-xs">移除</button>
+                  </div>
+                </li>
+              </ul>
+              <div v-else class="text-gray-400 text-sm py-2">暂无试卷</div>
+            </div>
+
+            <div v-if="editingProject === project.name" class="border-t border-gray-200 px-5 pb-5 pt-4 space-y-4 bg-yellow-50/30">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
+                  <input v-model="editForm.projectName" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">学科代码</label>
+                  <div class="relative">
+                    <input v-model="editForm.subjectCode" @input="onSubjectInput" type="text" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" :class="subjectCodeError ? 'border-red-500' : 'border-gray-300'" @focus="showSuggestions = true" @blur="hideSuggestions" autocomplete="off" />
+                    <ul v-if="showSuggestions && filteredSubjects.length > 0" class="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      <li v-for="(subject, index) in filteredSubjects" :key="subject.code" @mousedown.prevent="selectSubject(subject)" :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-50', highlightedIndex === index ? 'bg-blue-100 text-blue-800' : 'text-gray-700']">{{ subject.code }} {{ subject.name }}</li>
+                    </ul>
+                  </div>
+                  <p v-if="subjectCodeError" class="text-xs text-red-500 mt-1">{{ subjectCodeError }}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">试卷总分</label>
+                  <input v-model.number="editForm.totalScore" type="number" step="0.5" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <p v-if="totalScoreError" class="text-xs text-red-500 mt-1">{{ totalScoreError }}</p>
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button @click="cancelEdit" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">取消</button>
+                <button @click="saveEdit(project.name)" :disabled="!!subjectCodeError || !!totalScoreError || isLoadingSubjects" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">保存修改</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div v-if="showAddFileModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-[550px] max-h-[85vh] overflow-auto shadow-xl">
+        <h3 class="text-lg font-bold mb-4">选择要关联的已有试卷（仅显示学科匹配的试卷）</h3>
+        
+        <div class="flex gap-3 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+          <div class="flex-1">
+            <label class="block text-xs font-medium text-gray-600 mb-1">年份筛选</label>
+            <select v-model="filterYear" class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500 bg-white">
+              <option value="">全部年份</option>
+              <option v-for="year in yearOptions" :key="year" :value="year">{{ year }}年</option>
+            </select>
+          </div>
+          <div class="flex-1 relative">
+            <label class="block text-xs font-medium text-gray-600 mb-1">出题学院</label>
+            <input 
+              v-model="filterCollegeInput" 
+              @input="onFilterCollegeInput"
+              @focus="showFilterCollegeSuggestions = true"
+              @blur="validateCollegeFilter"
+              type="text" 
+              placeholder="输入或选择学院..."
+              class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500 bg-white"
+              autocomplete="off"
+            />
+            <ul v-if="showFilterCollegeSuggestions && filteredCollegeSuggestions.length > 0" 
+                class="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+              <li 
+                v-for="(college, idx) in filteredCollegeSuggestions" 
+                :key="college.id" 
+                @mousedown.prevent="selectFilterCollege(college)"
+                :class="['px-3 py-1.5 text-xs cursor-pointer hover:bg-blue-50', highlightCollegeIdx === idx ? 'bg-blue-100' : '']"
+              >
+                {{ college.name }}
+              </li>
+            </ul>
+          </div>
+          <div class="flex items-end">
+            <button @click="batchAddFiles" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm whitespace-nowrap">一键导入</button>
+          </div>
+        </div>
+
+        <ul v-if="filteredAddFiles.length > 0" class="space-y-2">
+          <li v-for="file in filteredAddFiles" :key="file.id" class="flex justify-between items-center p-2 border rounded bg-white hover:bg-gray-50/50">
+            <div>
+              <span class="font-medium text-gray-800">{{ file.name }}</span>
+              <div class="text-xs text-gray-400 mt-0.5 flex gap-x-3 flex-wrap">
+                <span>学科：{{ file.subjectCode }}</span>
+                <span v-if="file.examYear">年份：{{ file.examYear }}年</span>
+                <span v-if="file.examCollege">学院：{{ file.examCollege }}</span>
+              </div>
+            </div>
+            <button @click="addFileToProject(currentAddProject, file.id)" :disabled="file.adding" class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-300 text-xs shrink-0 ml-4">{{ file.adding ? '已关联' : '添加' }}</button>
+          </li>
+        </ul>
+        <div v-else class="text-center text-gray-400 text-sm py-8">暂无符合筛选条件的试卷</div>
+
+        <div class="mt-4 text-right">
+          <button @click="showAddFileModal = false" class="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="dialogVisible" class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-2">{{ dialogTitle }}</h3>
+        <p class="text-sm text-gray-700 mb-6 whitespace-pre-wrap">{{ dialogMessage }}</p>
+        <div class="flex justify-end gap-3">
+          <button v-if="dialogType === 'confirm'" @click="handleDialogCancel" class="px-4 py-2 text-sm rounded-md bg-gray-200 hover:bg-gray-300">取消</button>
+          <button @click="handleDialogConfirm" class="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700">{{ dialogType === 'alert' ? '确定' : '确认' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showReportModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+      <div class="bg-white rounded-xl p-6 w-[500px] max-h-[80vh] overflow-auto shadow-2xl">
+        <h3 class="text-lg font-bold mb-4">生成相似度报告 - {{ reportProjectName }}</h3>
+
+        <div v-if="reportPhase === 'starting'" class="space-y-3 text-center">
+          <div class="flex items-center gap-2 text-blue-700 justify-center">
+            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>正在配置 API 服务...</span>
+          </div>
+          <button @click="abortReport" class="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">终止</button>
+        </div>
+
+            <div v-if="reportPhase === 'parsing'" class="space-y-3">
+              <div class="flex items-center gap-2 text-blue-700">
+                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>试题解析中：{{ parseFileName }} （题目 {{ parseCurrentIndex + 1 }} / {{ parseQuestions.length }}）</span>
+              </div>
+              <div class="bg-blue-50 text-blue-800 text-sm p-2 rounded">{{ getCurrentParseTitle() }}</div>
+              <button @click="abortParsing" class="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm">终止解析</button>
+            </div>
+
+        <div v-if="reportPhase === 'running'" class="space-y-3">
+          <div class="flex items-center gap-2 text-blue-700">
+            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>正在比较题目 {{ currentCompareIndex }} / {{ totalCompareCount }}</span>
+          </div>
+          <div class="bg-blue-50 text-blue-800 text-sm p-2 rounded">{{ currentCompareDesc }}</div>
+          <button @click="abortReport" class="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm">终止</button>
+        </div>
+
+        <div v-if="reportPhase === 'done'" class="space-y-4">
+          <div class="text-green-600 font-bold text-lg">
+            {{ duplicateCount > 0 ? `报告生成完成，发现 ${duplicateCount} 对高度相似题目` : '未发现相似题目，报告已生成' }}
+          </div>
+          <div class="flex justify-end">
+            <button @click="closeReportModal" class="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">关闭</button>
+          </div>
+        </div>
+
+        <div v-if="reportPhase === 'aborted'" class="space-y-4">
+          <div class="text-orange-600 font-bold text-lg">操作已终止</div>
+          <button @click="closeReportModal" class="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, h, onMounted, onBeforeUnmount, computed, reactive, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+
+// ---------- 侧边栏 ----------
+const isCollapsed = ref(true)
+const toggleSidebar = () => { isCollapsed.value = !isCollapsed.value }
+
+const currentUser = ref({ fullName: '', employeeId: '' })
+const router = useRouter()
+const route = useRoute()
+
+const goToProfile = () => {
+  router.push('/profile')
+}
+
+const logout = () => {
+  localStorage.removeItem('currentUser')
+  router.push('/login')
+}
+
+// 新增：跳转到 new-task 页面
+const goToNewTask = () => {
+  router.push('/new-task')
+}
+
+const menuItems = [
+  { id: 'home', name: '主页', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' })]) },
+  { id: 'history', name: '历史项目', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' })]) },
+  { id: 'question-bank', name: '试卷管理', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' })]) },
+  { id: 'settings', name: '设置', icon: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', class: 'w-5 h-5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' }),
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z' })
+  ])}
+]
+
+const routeMap = {
+  home: { name: 'Menu', path: '/menu' },
+  'new-task': { name: 'newtask', path: '/new-task' },
+  history: { name: 'history', path: '/history' },
+  'question-bank': { name: 'question-bank', path: '/question-bank' },
+  settings: { name: 'Settings', path: '/settings' }
+}
+
+const navigateTo = (page) => {
+  const target = routeMap[page]
+  if (!target) return
+  if (target.name) {
+    router.push({ name: target.name }).catch(err => {
+      if (err.name !== 'NavigationDuplicated') console.error(err)
+    })
+  } else if (target.path) {
+    router.push(target.path).catch(err => {
+      if (err.name !== 'NavigationDuplicated') console.error(err)
+    })
+  }
+}
+
+const isActive = (id) => {
+  const target = routeMap[id]
+  if (!target) return false
+  if (id === 'home') return route.path === '/' || route.name === 'Menu'
+  return target.name ? route.name === target.name : route.path === target.path
+}
+
+// ---------- 弹窗逻辑 ----------
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const dialogMessage = ref('')
+const dialogType = ref('alert')
+let dialogResolve = null
+
+const showAlert = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '提示'
+    dialogMessage.value = message
+    dialogType.value = 'alert'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const showConfirm = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '确认'
+    dialogMessage.value = message
+    dialogType.value = 'confirm'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const handleDialogConfirm = () => {
+  dialogVisible.value = false
+  dialogResolve?.(true)
+}
+
+const handleDialogCancel = () => {
+  dialogVisible.value = false
+  dialogResolve?.(false)
+}
+
+// ---------- 项目列表 ----------
+const loading = ref(true)
+const projects = ref([])
+const searchKeyword = ref('')
+const fileCountCache = reactive({})
+const reportStatus = reactive({})
+
+const sortBy = ref('time')
+const sortOrder = ref('desc')
+const toggleSortOrder = () => { sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc' }
+
+const filteredProjects = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  return kw ? projects.value.filter(p => p.name.toLowerCase().includes(kw)) : projects.value
+})
+
+const sortedProjects = computed(() => {
+  const list = [...filteredProjects.value]
+  if (sortBy.value === 'name') {
+    list.sort((a, b) => {
+      const nameA = a.name.toLowerCase()
+      const nameB = b.name.toLowerCase()
+      if (nameA < nameB) return sortOrder.value === 'asc' ? -1 : 1
+      if (nameA > nameB) return sortOrder.value === 'asc' ? 1 : -1
+      return 0
+    })
+  } else {
+    list.sort((a, b) => {
+      const timeA = new Date(a.createTime).getTime()
+      const timeB = new Date(b.createTime).getTime()
+      return sortOrder.value === 'asc' ? timeA - timeB : timeB - timeA
+    })
+  }
+  return list
+})
+
+const refreshList = async () => {
+  loading.value = true
+  try {
+    const list = await window.projectAPI.list()
+    projects.value = list.map(p => ({ ...p, totalScore: p.totalScore !== undefined ? p.totalScore : 0 }))
+    list.forEach(p => loadFileCount(p.name))
+    await Promise.all(list.map(async (p) => {
+      try {
+        const full = await window.electronAPI.report.getFull(p.name)
+        reportStatus[p.name] = !!(full && full.report)
+      } catch {
+        reportStatus[p.name] = false
+      }
+    }))
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadFileCount = async (projectName) => {
+  const files = await window.documentAPI.listByProject(projectName)
+  fileCountCache[projectName] = files.length
+}
+
+const getProjectStatus = (name) => {
+  const count = fileCountCache[name] ?? 0
+  if (reportStatus[name]) {
+    return `报告已生成，共${count}个试卷`
+  } else {
+    return count > 0 ? `报告未生成，已上传${count}个试卷` : '空项目'
+  }
+}
+
+// ---------- 文件展开 ----------
+const expandedProject = ref(null)
+const projectFiles = ref([])
+const documentsLoading = ref(false)
+
+const toggleProjectExpand = async (projectName) => {
+  if (expandedProject.value === projectName) {
+    expandedProject.value = null
+    return
+  }
+  expandedProject.value = projectName
+  documentsLoading.value = true
+  try {
+    projectFiles.value = await window.documentAPI.listByProject(projectName)
+  } finally {
+    documentsLoading.value = false
+  }
+}
+
+// ---------- 添加文件 ----------
+const showAddFileModal = ref(false)
+const currentAddProject = ref('')
+const allFiles = ref([])
+
+const filterYear = ref('')
+const filterCollegeInput = ref('')
+const selectedFilterCollege = ref(null)
+const showFilterCollegeSuggestions = ref(false)
+const filteredCollegeSuggestions = ref([])
+const highlightCollegeIdx = ref(-1)
+let filterCollegeTimer = null
+
+// 全量学院列表（预加载）
+const allColleges = ref([])
+// 全量学科列表（预加载）
+const allSubjects = ref([])
+
+// 年份选项
+const yearOptions = computed(() => {
+  if (!allFiles.value.length) return []
+  const yearsSet = new Set()
+  allFiles.value.forEach(file => {
+    if (file.examYear) {
+      yearsSet.add(file.examYear.toString())
+    }
+  })
+  return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a))
+})
+
+// 学院输入防抖搜索（本地过滤）
+const onFilterCollegeInput = () => {
+  if (filterCollegeTimer) clearTimeout(filterCollegeTimer)
+  const kw = filterCollegeInput.value.trim()
+  if (!kw) {
+    filteredCollegeSuggestions.value = []
+    selectedFilterCollege.value = null
+    showFilterCollegeSuggestions.value = false
+    return
+  }
+  filterCollegeTimer = setTimeout(() => {
+    filteredCollegeSuggestions.value = allColleges.value.filter(col =>
+      col.name.toLowerCase().includes(kw.toLowerCase())
+    )
+    showFilterCollegeSuggestions.value = filteredCollegeSuggestions.value.length > 0
+    highlightCollegeIdx.value = -1
+  }, 200)
+}
+
+const selectFilterCollege = (college) => {
+  selectedFilterCollege.value = college
+  filterCollegeInput.value = college.name
+  showFilterCollegeSuggestions.value = false
+  filteredCollegeSuggestions.value = []
+  highlightCollegeIdx.value = -1
+}
+
+const validateCollegeFilter = () => {
+  setTimeout(async () => {
+    const input = filterCollegeInput.value.trim()
+    if (!input) {
+      selectedFilterCollege.value = null
+      filteredCollegeSuggestions.value = []
+      showFilterCollegeSuggestions.value = false
+      return
+    }
+    const matched = allColleges.value.find(col => col.name === input)
+    if (!matched) {
+      filterCollegeInput.value = ''
+      selectedFilterCollege.value = null
+      filteredCollegeSuggestions.value = []
+      showFilterCollegeSuggestions.value = false
+      if (input) await showAlert('学院不存在，已清空筛选')
+    } else {
+      selectedFilterCollege.value = matched
+      showFilterCollegeSuggestions.value = false
+    }
+  }, 200)
+}
+
+const filteredAddFiles = computed(() => {
+  return allFiles.value.filter(file => {
+    if (filterYear.value && String(file.examYear) !== filterYear.value) {
+      return false
+    }
+    if (selectedFilterCollege.value) {
+      if (file.examCollege !== selectedFilterCollege.value.name) {
+        return false
+      }
+    }
+    return true
+  })
+})
+
+const openAddFileModal = async (project) => {
+  currentAddProject.value = project.name
+  if (!project.subjectCode) {
+    await showAlert('请先设置该项目的学科代码，然后再添加试卷')
+    return
+  }
+  
+  filterYear.value = ''
+  filterCollegeInput.value = ''
+  selectedFilterCollege.value = null
+  showFilterCollegeSuggestions.value = false
+
+  const all = await window.documentAPI.listAll()
+  allFiles.value = all.filter(f => f.subjectCode === project.subjectCode)
+  const linked = await window.documentAPI.listByProject(project.name)
+  const ids = new Set(linked.map(d => d.id))
+  allFiles.value = allFiles.value.map(f => ({ ...f, adding: ids.has(f.id) }))
+  showAddFileModal.value = true
+}
+
+// 一键导入：批量添加当前筛选出的未关联文件
+const batchAddFiles = async () => {
+  const projectName = currentAddProject.value
+  if (!projectName) return
+
+  const filesToAdd = filteredAddFiles.value.filter(f => !f.adding)
+  if (filesToAdd.length === 0) {
+    await showAlert('当前筛选条件下没有可添加的新试卷')
+    return
+  }
+
+  // 如果项目已有报告，先确认并删除
+  if (reportStatus[projectName]) {
+    const ok = await showConfirm(`项目“${projectName}”已有报告，批量添加试卷将导致报告被删除。是否继续？`)
+    if (!ok) return
+    await deleteReportIfExists(projectName)
+  }
+
+  let successCount = 0
+  for (const file of filesToAdd) {
+    try {
+      await window.documentAPI.associate(projectName, file.id)
+      successCount++
+    } catch (e) {
+      console.error(`关联文件 ${file.name} 失败:`, e)
+    }
+  }
+
+  // 关闭模态框并刷新相关数据
+  showAddFileModal.value = false
+  await refreshList()
+  if (expandedProject.value === projectName) {
+    await toggleProjectExpand(projectName)
+  }
+  await showAlert(`已经成功添加 ${successCount} 个试卷`)
+}
+
+// ---------- 主文件 ----------
+const deleteReportIfExists = async (projectName) => {
+  try {
+    const full = await window.electronAPI.report.getFull(projectName)
+    if (full && full.report) {
+      await window.electronAPI.report.delete(projectName)
+      await window.electronAPI.similarity.deleteByProject(projectName)
+      reportStatus[projectName] = false
+      console.log(`已删除项目 ${projectName} 的报告及相似度记录`)
+    }
+  } catch (e) {
+    console.error('删除报告失败', e)
+  }
+}
+
+const setMainFile = async (projectName, mainDocId) => {
+  if (reportStatus[projectName]) {
+    const ok = await showConfirm('你确定要切换主试卷吗？这将会删除旧有的报告')
+    if (!ok) return
+    await deleteReportIfExists(projectName)
+  }
+  await window.projectAPI.update(projectName, { mainDocId })
+  const project = projects.value.find(p => p.name === projectName)
+  if (project) project.mainDocId = mainDocId
+}
+
+// ---------- 编辑项目 ----------
+const editingProject = ref(null)
+const editForm = reactive({ projectName: '', subjectCode: '', totalScore: 0 })
+const selectedSubject = ref(null)
+const subjectCodeError = ref('')
+const totalScoreError = ref('')
+const filteredSubjects = ref([])
+const showSuggestions = ref(false)
+const highlightedIndex = ref(-1)
+const isLoadingSubjects = ref(false)
+let subjectTimer = null
+const originalProjectTotalScore = ref(0)
+
+const startEdit = (project) => {
+  editingProject.value = project.name
+  editForm.projectName = project.name
+  editForm.subjectCode = project.subjectCode || ''
+  editForm.totalScore = project.totalScore !== undefined ? project.totalScore : 0
+  originalProjectTotalScore.value = project.totalScore !== undefined ? project.totalScore : 0
+  selectedSubject.value = project.subjectCode ? { code: project.subjectCode, name: '' } : null
+  subjectCodeError.value = ''
+  totalScoreError.value = ''
+  showSuggestions.value = false
+}
+
+const onSubjectInput = () => {
+  if (subjectTimer) clearTimeout(subjectTimer)
+  const kw = editForm.subjectCode.trim()
+  if (!kw) {
+    showSuggestions.value = false
+    filteredSubjects.value = []
+    subjectCodeError.value = ''
+    selectedSubject.value = null
+    return
+  }
+  isLoadingSubjects.value = true
+  subjectTimer = setTimeout(async () => {
+    try {
+      const results = await window.courseAPI.search(kw)
+      filteredSubjects.value = results
+      showSuggestions.value = results.length > 0
+      const exactMatch = results.find(s => s.code === kw)
+      if (exactMatch) {
+        selectedSubject.value = exactMatch
+        subjectCodeError.value = ''
+      } else {
+        subjectCodeError.value = results.length ? '' : '学科代码不存在'
+        selectedSubject.value = null
+      }
+      highlightedIndex.value = -1
+    } finally {
+      isLoadingSubjects.value = false
+    }
+  }, 300)
+}
+
+const selectSubject = (s) => {
+  selectedSubject.value = s
+  editForm.subjectCode = s.code
+  showSuggestions.value = false
+  subjectCodeError.value = ''
+}
+
+const hideSuggestions = () => {
+  setTimeout(() => { showSuggestions.value = false }, 200)
+}
+
+const cancelEdit = () => {
+  editingProject.value = null
+  editForm.projectName = ''
+  editForm.subjectCode = ''
+  editForm.totalScore = 0
+  selectedSubject.value = null
+  subjectCodeError.value = ''
+  totalScoreError.value = ''
+  showSuggestions.value = false
+}
+
+const saveEdit = async (oldName) => {
+  if (!editForm.projectName.trim()) {
+    await showAlert('名称不能为空')
+    return
+  }
+  const code = editForm.subjectCode.trim()
+  if (!code) {
+    await showAlert('请输入学科代码')
+    return
+  }
+  const totalScoreRaw = editForm.totalScore
+  if (totalScoreRaw === undefined || totalScoreRaw === null || isNaN(parseFloat(totalScoreRaw))) {
+    totalScoreError.value = '试卷总分必须为有效数字'
+    await showAlert('试卷总分必须为有效数字')
+    return
+  }
+  totalScoreError.value = ''
+
+  if (!selectedSubject.value || selectedSubject.value.code !== code) {
+    try {
+      const results = await window.courseAPI.search(code)
+      const match = results.find(s => s.code === code)
+      if (!match) {
+        await showAlert('无效的学科代码，请选择或输入正确的代码')
+        return
+      }
+      selectedSubject.value = match
+      subjectCodeError.value = ''
+    } catch {
+      await showAlert('学科代码验证失败，请重试')
+      return
+    }
+  }
+
+  if (reportStatus[oldName] && (editForm.projectName !== oldName || editForm.subjectCode !== code || editForm.totalScore !== originalProjectTotalScore.value)) {
+    const ok = await showConfirm(`项目“${oldName}”已有报告，修改项目信息将导致报告被删除。是否继续？`)
+    if (!ok) return
+    await deleteReportIfExists(oldName)
+  }
+
+  await window.projectAPI.update(oldName, {
+    projectName: editForm.projectName,
+    subjectCode: editForm.subjectCode,
+    totalScore: parseFloat(totalScoreRaw)
+  })
+  await refreshList()
+  cancelEdit()
+}
+
+// ---------- 删除 / 上传 / 移除 ----------
+const deleteProject = async (name) => {
+  const ok = await showConfirm(`确认删除 ${name}？`)
+  if (ok) {
+    await window.projectAPI.delete(name)
+    refreshList()
+  }
+}
+
+const uploadFileForProject = (projectName) => {
+  router.push({ path: '/devide', query: { projectName, from: '/history' } })
+}
+
+const removeFileFromProject = async (projectName, doc) => {
+  if (reportStatus[projectName]) {
+    const ok = await showConfirm(`项目“${projectName}”已有报告，移除试卷将导致报告被删除。是否继续？`)
+    if (!ok) return
+    await deleteReportIfExists(projectName)
+  }
+  await window.documentAPI.disassociate(projectName, doc.id)
+  await loadFileCount(projectName)
+  if (expandedProject.value === projectName) await toggleProjectExpand(projectName)
+}
+
+const addFileToProject = async (pName, docId) => {
+  if (reportStatus[pName]) {
+    const ok = await showConfirm(`项目“${pName}”已有报告，添加新试卷将导致报告被删除。是否继续？`)
+    if (!ok) return
+    await deleteReportIfExists(pName)
+  }
+  await window.documentAPI.associate(pName, docId)
+  showAddFileModal.value = false
+  await loadFileCount(pName)
+  if (expandedProject.value === pName) await toggleProjectExpand(pName)
+}
+
+const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
+const docStatusLabel = (s) => ['已上传', '已划分', '已核验'][s] || '未知'
+
+// ---------- 报告功能 ----------
+const showReportModal = ref(false)
+const reportProjectName = ref('')
+const reportPhase = ref('starting')
+const currentCompareIndex = ref(0)
+const totalCompareCount = ref(0)
+const currentCompareDesc = ref('')
+const duplicateCount = ref(0)
+let abortController = null
+
+// 解析相关状态（用于在生成报告时直接解析未解析试卷）
+const parseFileName = ref('')
+const parseDocId = ref(null)
+const parseQuestions = ref([])
+const parseCurrentIndex = ref(-1)
+const parseAllBlocks = ref([])
+let parseAbortController = null
+
+const getCurrentParseTitle = () => {
+  const idx = parseCurrentIndex.value
+  const q = parseQuestions.value[idx]
+  if (!q) return ''
+  const firstId = q.indices?.[0]
+  if (!firstId) return `第 ${idx + 1} 题`
+  const block = parseAllBlocks.value.find(b => b.id === firstId)
+  return block ? (block.text.substring(0, 30) + (block.text.length > 30 ? '...' : '')) : `第 ${idx + 1} 题`
+}
+
+const abortParsing = () => {
+  if (parseAbortController) parseAbortController.abort()
+  reportPhase.value = 'aborted'
+}
+
+// 统一处理：出现后端/解析错误时立刻弹窗并中止（标记 handled 防止外层重复提示）
+const handleFatalError = async (message, useParseController = false) => {
+  // 中止相应的控制器
+  try {
+    if (useParseController) {
+      parseAbortController?.abort()
+    } else {
+      abortController?.abort()
+    }
+  } catch (e) {
+    // ignore
+  }
+  reportPhase.value = 'aborted'
+  await showAlert(message)
+  const err = new Error(message)
+  err.handled = true
+  throw err
+}
+
+// 将 HTTP 状态码映射为简短含义
+const httpStatusMeaning = (code) => {
+  const map = {
+    400: '请求参数错误',
+    401: '未授权',
+    403: '禁止访问',
+    404: '未找到',
+    408: '请求超时',
+    429: '请求过多',
+    500: '内部服务器错误',
+    502: '网关错误',
+    503: '服务不可用',
+    504: '网关超时'
+  }
+  return map[code] || 'HTTP错误'
+}
+
+const formatHttpStatus = (status) => `${status} ${httpStatusMeaning(status)}`
+
+const briefFromResult = (res) => {
+  if (!res) return '未知错误'
+  if (typeof res.code === 'number') return formatHttpStatus(res.code)
+  if (typeof res.status === 'string' && res.status !== 'success') return `${res.status} 错误`
+  return '服务器错误'
+}
+
+const briefFromError = (e) => {
+  if (!e) return '未知错误'
+  if (e.code) return String(e.code)
+  if (e.name) return String(e.name)
+  const m = String(e.message || e)
+  return m.split('\n')[0].slice(0, 60)
+}
+
+async function configureActiveApiForParse() {
+  const settings = await window.electronAPI.settings.get()
+  const activeApiId = settings?.active_api_id
+  if (!activeApiId) throw new Error('请先在设置中选择一个 API 配置')
+  const apis = await window.electronAPI.apiConfig.list()
+  const activeApi = apis.find(a => a.id === activeApiId)
+  if (!activeApi) throw new Error('选中的 API 配置不存在')
+
+  const configForm = new URLSearchParams({
+    base_url: activeApi.endpoint,
+    model_name: activeApi.model,
+    api_key: activeApi.api_key
+  })
+  const res = await fetch('http://localhost:8000/set-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: configForm.toString()
+  })
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(txt || '配置后端失败')
+  }
+  const jr = await res.json()
+  if (jr.status && jr.status !== 'success' && jr.detail) throw new Error(jr.detail)
+}
+
+// 解析单个文档，复用 questionbank 的解析逻辑（简化）
+const parseDocument = async (doc) => {
+  parseFileName.value = doc.name
+  parseDocId.value = doc.id
+  const detail = await window.documentAPI.getDetail(doc.id)
+  parseAllBlocks.value = detail.blocks || []
+  parseQuestions.value = (detail.questions || []).map(q => ({ ...q }))
+  parseCurrentIndex.value = -1
+  parseAbortController = new AbortController()
+  const signal = parseAbortController.signal
+
+  for (let i = 0; i < parseQuestions.value.length; i++) {
+    if (signal.aborted) break
+    parseCurrentIndex.value = i
+    const q = parseQuestions.value[i]
+    let content = ''
+    if (q.indices && q.indices.length > 0) {
+      content = q.indices.map(id => parseAllBlocks.value.find(b => b.id === id)?.text || '').join('\n')
+    } else {
+      continue
+    }
+    if (!content.trim()) continue
+
+    let score = 0
+    let qType = ''
+    let tag1 = '', tag2 = '', tag3 = ''
+
+    try {
+      const firstRes = await fetch('http://localhost:8000/extract-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ content, question_id: q.id.toString() }).toString(),
+        signal
+      })
+      if (!firstRes.ok) {
+        // 仅显示状态码与含义
+        await handleFatalError(`解析失败：${formatHttpStatus(firstRes.status)}`, true)
+      }
+      const firstResult = await firstRes.json()
+      if (firstResult.status === 'success' && firstResult.data) {
+        score = firstResult.data['分数'] || 0
+        qType = firstResult.data['题型'] || ''
+        tag1 = firstResult.data['标签1'] || ''
+        tag2 = firstResult.data['标签2'] || ''
+        tag3 = firstResult.data['标签3'] || ''
+      } else if (firstResult.status && firstResult.status !== 'success') {
+        await handleFatalError(`解析失败：${briefFromResult(firstResult)}`, true)
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') break
+      await handleFatalError('解析失败：' + (e.message || e), true)
+    }
+
+    const needSecond = (score === 0 || qType === '未知' || !qType) && !signal.aborted
+    if (needSecond) {
+      try {
+        const minBlockId = Math.min(...q.indices)
+        const beforeBlocks = parseAllBlocks.value.filter(b => b.id < minBlockId).map(b => b.text || '').filter(t => t.trim() !== '')
+        const secondRes = await fetch('http://localhost:8000/extract-tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ content, context_blocks: JSON.stringify(beforeBlocks), question_id: q.id.toString() }).toString(),
+          signal
+        })
+        if (!secondRes.ok) {
+          await handleFatalError(`解析失败：${formatHttpStatus(secondRes.status)}`, true)
+        }
+        const secondResult = await secondRes.json()
+        if (secondResult.status === 'success' && secondResult.data) {
+          const newScore = secondResult.data['分数'] || 0
+          if (newScore > 0) score = newScore
+          const newType = secondResult.data['题型'] || ''
+          if (newType && newType !== '未知') qType = newType
+          tag1 = secondResult.data['标签1'] || tag1
+          tag2 = secondResult.data['标签2'] || tag2
+          tag3 = secondResult.data['标签3'] || tag3
+        } else if (secondResult.status && secondResult.status !== 'success') {
+          await handleFatalError(`解析失败：${briefFromResult(secondResult)}`, true)
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') break
+        await handleFatalError('解析失败：' + briefFromError(e), true)
+      }
+    }
+
+    q.type = qType
+    q.score = score
+    q.tag1 = tag1
+    q.tag2 = tag2
+    q.tag3 = tag3
+  }
+
+  if (parseAbortController?.signal.aborted) {
+    throw new Error('解析被终止')
+  }
+
+  // 保存结果
+  const payloadQuestions = parseQuestions.value.map(q => ({ id: q.id, indices: q.indices, title: q.title || '', type: q.type, score: q.score, tag1: q.tag1, tag2: q.tag2, tag3: q.tag3 }))
+  const cleanBlocks = parseAllBlocks.value.map(b => ({ id: b.id, text: b.text, tag: b.tag }))
+  const serializable = JSON.parse(JSON.stringify({ blocks: cleanBlocks, questions: payloadQuestions }))
+  await window.documentAPI.update(parseDocId.value, serializable)
+  await window.documentAPI.update(parseDocId.value, { parsed: true })
+}
+
+const viewReport = async (projectName) => {
+  const project = projects.value.find(p => p.name === projectName)
+  if (!project) {
+    await showAlert('项目不存在')
+    return
+  }
+  const mainDocId = project.mainDocId
+  if (!mainDocId) {
+    await showAlert('该项目未设置主试卷，无法查看报告')
+    return
+  }
+  router.push({ path: '/report', query: { project: projectName, mainDocId } })
+}
+
+const startGenerateReport = async (projectName) => {
+  const project = projects.value.find(p => p.name === projectName)
+  if (!project) return showAlert('项目不存在')
+
+  // 如果已有报告，先在点击时就提示覆盖
+  if (reportStatus[projectName]) {
+    const confirmOverwrite = await showConfirm('生成新报告将覆盖原有报告和相似度记录，确定继续吗？')
+    if (!confirmOverwrite) return
+    await deleteReportIfExists(projectName)
+  }
+  let allDocs = await window.documentAPI.listByProject(projectName)
+  if (allDocs.length === 0) return showAlert('项目尚无任何试卷')
+
+  const unparsedDocs = allDocs.filter(doc => !doc.parsed)
+  if (unparsedDocs.length > 0) {
+    // 自动解析未解析文件（按顺序），若解析失败则中止生成报告
+    reportProjectName.value = projectName
+    showReportModal.value = true
+    reportPhase.value = 'parsing'
+    try {
+      await configureActiveApiForParse()
+    } catch (e) {
+      await showAlert('解析前配置后端失败：' + (e.message || e))
+      reportPhase.value = 'aborted'
+      return
+    }
+
+    for (const doc of unparsedDocs) {
+      try {
+        await parseDocument(doc)
+      } catch (err) {
+        if (!err.handled) await showAlert('试卷解析失败：' + (err.message || err))
+        reportPhase.value = 'aborted'
+        return
+      }
+    }
+
+    // 解析完成后刷新当前项目的文件信息
+    allDocs = await window.documentAPI.listByProject(projectName)
+    reportPhase.value = 'starting'
+  }
+
+  const mainDocId = project.mainDocId
+  if (!mainDocId) return showAlert('请先设置一个主试卷（在试卷列表中点击 ⭐）')
+
+  if (allDocs.length < 2) return showAlert('至少需要两个试卷（主试卷 + 至少一个副试卷）')
+
+  const mainDoc = allDocs.find(d => d.id === mainDocId)
+  if (!mainDoc) return showAlert('主试卷已失效，请重新设置')
+
+  const subDocs = allDocs.filter(d => d.id !== mainDocId)
+  if (subDocs.length === 0) return showAlert('没有可对比的副试卷')
+
+  const mainDetail = await window.documentAPI.getDetail(mainDocId)
+
+
+
+  reportProjectName.value = projectName
+  showReportModal.value = true
+  reportPhase.value = 'starting'
+  duplicateCount.value = 0
+  abortController = new AbortController()
+
+  try {
+    const settings = await window.electronAPI.settings.get()
+    const activeApiId = settings?.active_api_id
+    if (!activeApiId) throw new Error('请先在设置中选择一个 API 配置')
+
+    const apis = await window.electronAPI.apiConfig.list()
+    const activeApi = apis.find(a => a.id === activeApiId)
+    if (!activeApi) throw new Error('选中的 API 配置不存在')
+
+    const configForm = new URLSearchParams({
+      base_url: activeApi.endpoint,
+      model_name: activeApi.model,
+      api_key: activeApi.api_key
+    })
+    const configRes = await fetch('http://localhost:8000/set-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: configForm.toString(),
+      signal: abortController.signal
+    })
+    if (!configRes.ok) throw new Error('API 配置失败')
+
+    const mainBlocks = mainDetail.blocks || []
+    const mainQData = mainDetail.questions.map(q => ({
+      ...q,
+      body: (q.indices || []).map(id => mainBlocks.find(b => b.id === id)?.text || '').join('\n')
+    }))
+
+    const subData = []
+    for (const doc of subDocs) {
+      const detail = await window.documentAPI.getDetail(doc.id)
+      const questions = (detail.questions || []).map(q => ({
+        ...q,
+        body: (q.indices || []).map(id => detail.blocks.find(b => b.id === id)?.text || '').join('\n')
+      }))
+      subData.push({ doc, questions })
+    }
+
+    let totalPairs = 0
+    for (const sd of subData) {
+      totalPairs += sd.questions.length * mainQData.length
+    }
+    // 加入主试卷内部题目之间的比较（每对只算一次）
+    const n = mainQData.length
+    const internalPairs = Math.max(0, n * (n - 1) / 2)
+    totalPairs += internalPairs
+    totalCompareCount.value = totalPairs
+    reportPhase.value = 'running'
+
+    const threshold = settings.similarity_threshold ?? 50
+    let processed = 0
+
+    // 1) 先完成主试卷内部所有题目之间的比较（每对一次）
+    for (let i = 0; i < mainQData.length; i++) {
+      if (abortController.signal.aborted) break
+      for (let k = i + 1; k < mainQData.length; k++) {
+        if (abortController.signal.aborted) break
+        const q1 = mainQData[i]
+        const q2 = mainQData[k]
+        processed++
+        currentCompareIndex.value = processed
+        currentCompareDesc.value = `主试卷第${i + 1}题 ↔ 主试卷第${k + 1}题`
+
+        try {
+          const payload = {
+            question1: { body: q1.body, type: q1.type || '', tags: [q1.tag1, q1.tag2, q1.tag3].filter(t => t && t !== '其他考点') },
+            question2: { body: q2.body, type: q2.type || '', tags: [q2.tag1, q2.tag2, q2.tag3].filter(t => t && t !== '其他考点') },
+            threshold
+          }
+          const resp = await fetch('http://localhost:8000/check-similarity', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: abortController.signal
+          })
+            if (!resp.ok) {
+              await handleFatalError(`相似度对比失败：${formatHttpStatus(resp.status)}`, false)
+            }
+            const result = await resp.json()
+            if (result.status && result.status !== 'success') {
+              await handleFatalError(`相似度对比失败：${briefFromResult(result)}`, false)
+            }
+
+            await window.electronAPI.similarity.add(projectName, { question1Id: q1.id, question2Id: q2.id, similarity: result.similarity, reason: result.reason || '' })
+            if (result.is_duplicate) duplicateCount.value++
+        } catch (e) {
+            if (e.name === 'AbortError') break
+            await handleFatalError('对比出错：' + briefFromError(e), false)
+        }
+      }
+    }
+
+    // 2) 然后按副文件逐个比较：对每个副文件，遍历主试卷所有题目与副文件的题目比较
+    for (const sd of subData) {
+      if (abortController.signal.aborted) break
+      for (let i = 0; i < mainQData.length; i++) {
+        if (abortController.signal.aborted) break
+        const mainQ = mainQData[i]
+        for (let j = 0; j < sd.questions.length; j++) {
+          if (abortController.signal.aborted) break
+          const subQ = sd.questions[j]
+          processed++
+          currentCompareIndex.value = processed
+          currentCompareDesc.value = `主试卷第${i + 1}题 ↔ ${sd.doc.name} 第${j + 1}题`
+
+          try {
+            const payload = {
+              question1: { body: mainQ.body, type: mainQ.type || '', tags: [mainQ.tag1, mainQ.tag2, mainQ.tag3].filter(t => t && t !== '其他考点') },
+              question2: { body: subQ.body, type: subQ.type || '', tags: [subQ.tag1, subQ.tag2, subQ.tag3].filter(t => t && t !== '其他考点') },
+              threshold
+            }
+            const resp = await fetch('http://localhost:8000/check-similarity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: abortController.signal })
+                if (!resp.ok) {
+                  await handleFatalError(`相似度对比失败：${formatHttpStatus(resp.status)}`, false)
+                }
+                const result = await resp.json()
+                if (result.status && result.status !== 'success') {
+                  await handleFatalError(`相似度对比失败：${briefFromResult(result)}`, false)
+                }
+
+                await window.electronAPI.similarity.add(projectName, { question1Id: mainQ.id, question2Id: subQ.id, similarity: result.similarity, reason: result.reason || '' })
+                if (result.is_duplicate) duplicateCount.value++
+          } catch (e) {
+                    if (e.name === 'AbortError') break
+                    await handleFatalError('对比出错：' + briefFromError(e), false)
+          }
+        }
+      }
+    }
+
+    if (abortController.signal.aborted) {
+      reportPhase.value = 'aborted'
+      return
+    }
+
+    await window.electronAPI.report.saveOrUpdate(projectName, {
+      threshold,
+      summary: `共发现 ${duplicateCount.value} 对高度相似题目`
+    })
+    reportStatus[projectName] = true
+    reportPhase.value = 'done'
+  } catch (e) {
+    if (!abortController?.signal.aborted) {
+      if (!e.handled) await showAlert('报告生成失败：' + (e.message || '未知错误'))
+      reportPhase.value = 'aborted'
+    }
+  }
+}
+
+const abortReport = () => {
+  abortController?.abort()
+  reportPhase.value = 'aborted'
+}
+
+const closeReportModal = () => {
+  showReportModal.value = false
+}
+
+// 加载全量学院列表
+const loadColleges = async () => {
+  try {
+    allColleges.value = await window.electronAPI.invoke('college:listAll')
+  } catch (err) {
+    console.error('加载学院列表失败', err)
+    allColleges.value = []
+  }
+}
+
+const loadSubjects = async () => {
+  try {
+    allSubjects.value = await window.courseAPI.listAll()
+  } catch (err) {
+    console.error('加载学科列表失败', err)
+    allSubjects.value = []
+  }
+}
+
+// 辅助：根据学科代码返回显示文本
+const getSubjectDisplay = (subjectCode) => {
+  if (!subjectCode) return '未设置'
+  const subject = allSubjects.value.find(s => s.code === subjectCode)
+  return subject ? `${subject.code} ${subject.name}` : subjectCode
+}
+
+// 生命周期挂载
+onMounted(async () => {
+  const storedUser = localStorage.getItem('currentUser')
+  if (!storedUser) {
+    router.push('/login')
+    return
+  }
+  try {
+    const user = JSON.parse(storedUser)
+    currentUser.value = user
+  } catch (e) {
+    router.push('/login')
+  }
+
+  await loadColleges()
+  await loadSubjects()
+  await refreshList()
+  const projectName = route.query.projectName ? (Array.isArray(route.query.projectName) ? route.query.projectName[0] : route.query.projectName) : ''
+  searchKeyword.value = projectName || ''
+})
+
+watch(() => route.query.projectName, (value) => {
+  const projectName = value ? (Array.isArray(value) ? value[0] : value) : ''
+  searchKeyword.value = projectName || ''
+})
+
+onBeforeUnmount(() => {
+  if (subjectTimer) clearTimeout(subjectTimer)
+  if (filterCollegeTimer) clearTimeout(filterCollegeTimer)
+})
+</script>
+
+<style scoped>
+.transition-all { transition-property: all; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+header.sticky {
+  position: sticky;
+  top: 0;
+  background-color: white;
+  z-index: 30;
+}
+</style>

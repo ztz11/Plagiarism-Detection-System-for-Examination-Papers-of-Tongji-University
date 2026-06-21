@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vite App</title>
+  </head>
+  <body>
+    <!-- 监控脚本：监听属性变化并检查计算样�?-->
+    <script>
+      (function() {
+        const LOG_KEY = 'pointer_css_log';
+        const logs = [];
+
+        // 恢复旧日�?        try {
+          const old = localStorage.getItem(LOG_KEY);
+          if (old) logs.push(...JSON.parse(old));
+        } catch(e) {}
+
+        function saveLogs() {
+          try {
+            localStorage.setItem(LOG_KEY, JSON.stringify(logs));
+          } catch(e) {}
+        }
+
+        function addLog(msg) {
+          logs.push(msg);
+          saveLogs();
+        }
+
+        function checkPointerEvents(element, triggerDescription) {
+          const computed = window.getComputedStyle(element);
+          if (computed.pointerEvents === 'none') {
+            const stack = new Error().stack;
+            const classList = Array.from(element.classList).join(' ') || '(empty)';
+            addLog(
+              `[${new Date().toISOString()}] computed pointer-events = 'none' on <${element.tagName}>\n` +
+              `Trigger: ${triggerDescription}\n` +
+              `Class list: ${classList}\n` +
+              `Stack:\n${stack}`
+            );
+          }
+        }
+
+        function setupObservers() {
+          // 同时观察 <html> �?<body> �?class + style 属�?          const targets = [document.documentElement, document.body];
+          targets.forEach(el => {
+            if (!el) return;
+            const observer = new MutationObserver((mutations) => {
+              mutations.forEach(m => {
+                if (m.type === 'attributes' &&
+                    (m.attributeName === 'class' || m.attributeName === 'style')) {
+                  checkPointerEvents(el, `${m.attributeName} changed on ${el.tagName}`);
+                }
+              });
+            });
+            observer.observe(el, {
+              attributes: true,
+              attributeFilter: ['class', 'style']
+            });
+          });
+
+          // 初始也检查一次（有可能在脚本执行�?body 已经被污染）
+          checkPointerEvents(document.body, 'initial check');
+          checkPointerEvents(document.documentElement, 'initial check');
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setupObservers);
+        } else {
+          setupObservers();
+        }
+      })();
+    </script>
+
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

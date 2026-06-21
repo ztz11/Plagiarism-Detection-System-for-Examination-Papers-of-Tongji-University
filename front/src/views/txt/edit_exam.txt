@@ -1,0 +1,628 @@
+<template>
+  <div class="h-screen flex flex-col font-sans bg-gray-50">
+    <header class="h-16 bg-white border-b px-6 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+      <div class="flex items-center space-x-4">
+        <button @click="handleBack" class="flex items-center text-gray-500 hover:text-blue-600 font-medium transition-colors">
+          <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+          返回前序页面
+        </button>
+        <div class="h-6 w-px bg-gray-200"></div>
+        <h1 class="text-lg font-bold text-blue-900">试卷语义划分调整</h1>
+      </div>
+      <button v-if="analysisData" @click="saveFinalResult" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md">
+        确认并保存划�?
+      </button>
+    </header>
+
+    <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex gap-6 overflow-hidden" style="height: calc(100vh - 4rem);">
+      <div v-if="loading" class="flex-1 flex items-center justify-center text-gray-400">加载文档数据�?..</div>
+      <template v-else>
+        <!-- 左侧编辑�?-->
+        <div class="flex-1 flex flex-col overflow-hidden">
+          <div class="flex-1 overflow-y-auto pr-2 space-y-6 pb-12">
+            <div v-for="(q, qIndex) in analysisData.questions" :key="qIndex" 
+                 class="bg-white rounded-2xl border-2 border-white shadow-sm hover:border-blue-200 transition-all p-6"
+                 @mouseleave="onQuestionMouseLeave(qIndex)">
+              <!-- 标题与删�?-->
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-lg font-bold text-blue-900 truncate max-w-[70%]" :title="getQuestionDisplayTitle(q)">
+                  {{ getQuestionDisplayTitle(q) }}
+                </span>
+                <div class="flex gap-2">
+                  <button v-if="unassignedBlocks.length > 0" @click="pasteAllToQuestion(qIndex)" class="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-md hover:bg-orange-200" title="将资源池中所有块一次性移入此�?>
+                    全部移入
+                  </button>
+                  <button @click="deleteQuestion(qIndex)" class="p-1.5 text-gray-300 hover:text-red-500 transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 题型、分值、标签编辑区 -->
+              <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+                <!-- 题型 -->
+                <div class="flex items-center gap-1 bg-gray-100 rounded px-2 py-0.5">
+                  <span class="text-gray-500 text-xs">题型�?/span>
+                  <template v-if="editingMetaField === `type_${qIndex}`">
+                    <input
+                      :ref="el => { if (editingMetaField === `type_${qIndex}`) metaInput = el }"
+                      v-model="editMetaValue"
+                      @blur="finishMetaEdit(qIndex, 'type')"
+                      @keyup.enter="finishMetaEdit(qIndex, 'type')"
+                      class="w-16 border border-blue-300 rounded px-1 py-0.5 text-xs focus:outline-none"
+                    />
+                  </template>
+                  <span v-else @click="startMetaEdit(qIndex, 'type', q.type)" class="font-medium text-gray-800 cursor-pointer hover:bg-yellow-50 px-1 rounded">
+                    {{ q.type || '未设�? }}
+                  </span>
+                </div>
+
+                <!-- 分�?-->
+                <div class="flex items-center gap-1 bg-gray-100 rounded px-2 py-0.5">
+                  <span class="text-gray-500 text-xs">分值：</span>
+                  <template v-if="editingMetaField === `score_${qIndex}`">
+                    <input
+                      :ref="el => { if (editingMetaField === `score_${qIndex}`) metaInput = el }"
+                      v-model.number="editMetaValue"
+                      @blur="finishMetaEdit(qIndex, 'score')"
+                      @keyup.enter="finishMetaEdit(qIndex, 'score')"
+                      type="number"
+                      step="any"
+                      class="w-12 border border-blue-300 rounded px-1 py-0.5 text-xs focus:outline-none"
+                    />
+                  </template>
+                  <span v-else @click="startMetaEdit(qIndex, 'score', q.score)" class="font-medium text-gray-800 cursor-pointer hover:bg-yellow-50 px-1 rounded">
+                    {{ q.score ?? '未设�? }}
+                  </span>
+                </div>
+
+                <!-- 标签1 -->
+                <div class="flex items-center gap-1 bg-gray-100 rounded px-2 py-0.5">
+                  <span class="text-gray-500 text-xs">标签1�?/span>
+                  <template v-if="editingMetaField === `tag1_${qIndex}`">
+                    <input
+                      :ref="el => { if (editingMetaField === `tag1_${qIndex}`) metaInput = el }"
+                      v-model="editMetaValue"
+                      @blur="finishMetaEdit(qIndex, 'tag1')"
+                      @keyup.enter="finishMetaEdit(qIndex, 'tag1')"
+                      class="w-20 border border-blue-300 rounded px-1 py-0.5 text-xs focus:outline-none"
+                    />
+                  </template>
+                  <span v-else @click="startMetaEdit(qIndex, 'tag1', q.tag1)" class="font-medium text-gray-800 cursor-pointer hover:bg-yellow-50 px-1 rounded">
+                    {{ q.tag1 || '�? }}
+                  </span>
+                </div>
+
+                <!-- 标签2 -->
+                <div class="flex items-center gap-1 bg-gray-100 rounded px-2 py-0.5">
+                  <span class="text-gray-500 text-xs">标签2�?/span>
+                  <template v-if="editingMetaField === `tag2_${qIndex}`">
+                    <input
+                      :ref="el => { if (editingMetaField === `tag2_${qIndex}`) metaInput = el }"
+                      v-model="editMetaValue"
+                      @blur="finishMetaEdit(qIndex, 'tag2')"
+                      @keyup.enter="finishMetaEdit(qIndex, 'tag2')"
+                      class="w-20 border border-blue-300 rounded px-1 py-0.5 text-xs focus:outline-none"
+                    />
+                  </template>
+                  <span v-else @click="startMetaEdit(qIndex, 'tag2', q.tag2)" class="font-medium text-gray-800 cursor-pointer hover:bg-yellow-50 px-1 rounded">
+                    {{ q.tag2 || '�? }}
+                  </span>
+                </div>
+
+                <!-- 标签3 -->
+                <div class="flex items-center gap-1 bg-gray-100 rounded px-2 py-0.5">
+                  <span class="text-gray-500 text-xs">标签3�?/span>
+                  <template v-if="editingMetaField === `tag3_${qIndex}`">
+                    <input
+                      :ref="el => { if (editingMetaField === `tag3_${qIndex}`) metaInput = el }"
+                      v-model="editMetaValue"
+                      @blur="finishMetaEdit(qIndex, 'tag3')"
+                      @keyup.enter="finishMetaEdit(qIndex, 'tag3')"
+                      class="w-20 border border-blue-300 rounded px-1 py-0.5 text-xs focus:outline-none"
+                    />
+                  </template>
+                  <span v-else @click="startMetaEdit(qIndex, 'tag3', q.tag3)" class="font-medium text-gray-800 cursor-pointer hover:bg-yellow-50 px-1 rounded">
+                    {{ q.tag3 || '�? }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- 题目内容�?-->
+              <div class="bg-gray-50 rounded-xl p-4 space-y-2">
+                <div v-for="(blockId, blockIdx) in q.indices" :key="blockId" class="group flex items-start gap-3 p-2 hover:bg-white rounded-lg transition-all">
+                  <div class="flex-1 text-sm text-gray-700 leading-relaxed">
+                    <span class="text-[10px] text-blue-400 font-mono mr-2">#{{blockId}}</span>
+                    <template v-if="editingBlockId === blockId">
+                      <input
+                        :ref="el => { if (editingBlockId === blockId) editInput = el }"
+                        v-model="editText"
+                        @blur="finishEdit(blockId)"
+                        @keyup.enter="finishEdit(blockId)"
+                        class="border border-blue-300 rounded px-1 py-0.5 text-sm w-full focus:outline-none focus:border-blue-500"
+                      />
+                    </template>
+                    <span
+                      v-else
+                      @click="startEdit(blockId, getBlockById(blockId)?.text || '')"
+                      class="cursor-text hover:bg-yellow-50 whitespace-pre-wrap"
+                    >{{ getBlockById(blockId)?.text }}</span>
+                  </div>
+                  <div class="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="flex gap-1">
+                      <button v-if="blockIdx > 0" @click="moveBlockInQuestion(qIndex, blockIdx, -1)" class="px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] rounded hover:bg-blue-200" title="上移">�?/button>
+                      <button v-if="blockIdx < q.indices.length - 1" @click="moveBlockInQuestion(qIndex, blockIdx, 1)" class="px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[10px] rounded hover:bg-blue-200" title="下移">�?/button>
+                    </div>
+                    <button @click="moveBlockToPool(qIndex, blockId)" class="px-2 py-1 bg-red-50 text-red-500 text-xs rounded hover:bg-red-500 hover:text-white transition-all">
+                      移入资源�?
+                    </button>
+                  </div>
+                </div>
+                <div v-if="q.indices.length === 0" class="text-center py-4 text-gray-300 text-xs italic">
+                  暂无内容，可从右侧资源池移入�?
+                </div>
+              </div>
+
+              <div class="mt-4 text-center">
+                <button @click="insertQuestionAfter(qIndex)" class="text-blue-500 hover:text-blue-700 text-xs font-medium underline underline-offset-2">
+                  + 在此题目后插入新题目
+                </button>
+              </div>
+            </div>
+
+            <button @click="addNewQuestionToEnd" class="w-full py-4 border-2 border-dashed border-gray-300 rounded-2xl text-gray-400 hover:border-blue-400 hover:text-blue-400 transition-all font-medium">
+              + 在末尾添加新题目
+            </button>
+          </div>
+        </div>
+
+        <!-- 右侧资源�?-->
+        <div class="w-80 flex-shrink-0 flex flex-col">
+          <div class="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 shadow-sm flex-1 flex flex-col overflow-hidden">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-orange-800 font-bold flex items-center">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" /></svg>
+                资源�?
+              </span>
+              <span class="text-xs text-orange-600">{{ unassignedBlocks.length }} 个块</span>
+            </div>
+
+            <div class="flex gap-2 mb-3">
+              <input v-model="newBlockText" @keyup.enter="addNewBlock" placeholder="输入新块内容" class="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-orange-400" />
+              <button @click="addNewBlock" class="px-3 py-1 bg-orange-500 text-white rounded text-xs font-bold hover:bg-orange-600 transition-colors">添加</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto space-y-2 pr-1">
+              <div v-if="unassignedBlocks.length === 0" class="text-center text-gray-400 text-xs py-6">
+                暂无待分配块<br>可从左侧题目中移�?
+              </div>
+              <div v-for="block in unassignedBlocks" :key="block.id" class="flex items-center gap-2 bg-white border border-orange-300 rounded-lg px-3 py-2 shadow-sm text-xs">
+                <div class="flex-1">
+                  <template v-if="editingBlockId === block.id">
+                    <input
+                      :ref="el => { if (editingBlockId === block.id) editInput = el }"
+                      v-model="editText"
+                      @blur="finishEdit(block.id)"
+                      @keyup.enter="finishEdit(block.id)"
+                      class="border border-blue-300 rounded px-1 py-0.5 text-xs w-full focus:outline-none focus:border-blue-500"
+                    />
+                  </template>
+                  <p
+                    v-else
+                    @click="startEdit(block.id, block.text)"
+                    class="text-gray-800 break-all line-clamp-2 cursor-text hover:bg-yellow-50"
+                    :title="block.text"
+                  >{{ block.text }}</p>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <select v-model="targetMap[block.id]" class="border border-gray-300 rounded px-1 py-0.5 text-[10px] focus:outline-none w-20">
+                    <option disabled value="">移至�?/option>
+                    <option v-for="(q, idx) in analysisData.questions" :key="idx" :value="idx">
+                      {{ getQuestionDisplayTitle(q).substring(0,8) || `�?{idx+1}` }}
+                    </option>
+                  </select>
+                  <div class="flex gap-1">
+                    <button @click="moveSingleBlock(block.id)" :disabled="targetMap[block.id] === undefined || targetMap[block.id] === ''" class="flex-1 px-1 py-0.5 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300 text-[10px]">
+                      移动
+                    </button>
+                    <button @click="permanentDeleteBlock(block.id)" class="px-1 py-0.5 text-red-500 hover:text-red-700 text-[10px] font-bold">删除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </main>
+
+    <!-- 对话�?-->
+    <div v-if="dialogVisible" class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-30">
+      <div class="bg-white rounded-xl p-6 w-80 shadow-2xl border border-gray-200">
+        <h3 class="text-lg font-bold mb-2">{{ dialogTitle }}</h3>
+        <p class="text-sm text-gray-700 mb-6">{{ dialogMessage }}</p>
+        <div class="flex justify-end gap-3">
+          <button
+            v-if="dialogType === 'confirm'"
+            @click="handleDialogCancel"
+            class="px-4 py-2 text-sm rounded-md bg-gray-200 hover:bg-gray-300"
+          >
+            取消
+          </button>
+          <button
+            @click="handleDialogConfirm"
+            class="px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700"
+          >
+            {{ dialogType === 'alert' ? '确定' : '确认' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
+const route = useRoute()
+const router = useRouter()
+const docId = ref(Number(route.query.docId))
+
+const loading = ref(true)
+const analysisData = ref(null)
+const unassignedBlocks = ref([])
+const targetMap = reactive({})
+const source = ref(route.query.source || 'history')
+const returnUrl = ref(route.query.returnUrl || '')
+const newBlockText = ref('')
+
+// --- 对话�?---
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const dialogMessage = ref('')
+const dialogType = ref('alert')
+let dialogResolve = null
+
+const showAlert = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '提示'
+    dialogMessage.value = message
+    dialogType.value = 'alert'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const showConfirm = (message) => {
+  return new Promise((resolve) => {
+    dialogTitle.value = '确认'
+    dialogMessage.value = message
+    dialogType.value = 'confirm'
+    dialogVisible.value = true
+    dialogResolve = resolve
+  })
+}
+
+const handleDialogConfirm = () => {
+  dialogVisible.value = false
+  dialogResolve?.(true)
+}
+
+const handleDialogCancel = () => {
+  dialogVisible.value = false
+  dialogResolve?.(false)
+}
+
+// --- 元数据编辑状�?---
+const editingMetaField = ref(null)
+const editMetaValue = ref('')
+const metaInput = ref(null)
+
+const startMetaEdit = (qIndex, field, currentValue) => {
+  editingMetaField.value = `${field}_${qIndex}`
+  editMetaValue.value = currentValue ?? ''
+  nextTick(() => {
+    metaInput.value?.focus()
+  })
+}
+
+const finishMetaEdit = (qIndex, field) => {
+  if (editingMetaField.value !== `${field}_${qIndex}`) return
+  const q = analysisData.value.questions[qIndex]
+  if (field.startsWith('tag')) {
+    q[field] = editMetaValue.value.trim()
+  } else if (field === 'type') {
+    q.type = editMetaValue.value.trim()
+  } else if (field === 'score') {
+    const val = Number(editMetaValue.value)
+    q.score = isNaN(val) ? 0 : val
+  }
+  editingMetaField.value = null
+}
+
+onMounted(async () => {
+  try {
+    const doc = await window.documentAPI.getDetail(docId.value)
+    const questions = doc.questions.map(q => ({
+      ...q,
+      _origIndices: [...q.indices],
+      _origTags: {
+        tag1: q.tag1 || '',
+        tag2: q.tag2 || '',
+        tag3: q.tag3 || '',
+        type: q.type || '',
+        score: q.score ?? 0
+      }
+    }))
+    analysisData.value = {
+      blocks: doc.blocks,
+      questions
+    }
+    autoAssignUnusedBlocks()
+  } catch (err) {
+    await showAlert('加载文档失败�? + err.message)
+  } finally {
+    loading.value = false
+  }
+})
+
+// --- 工具 ---
+const getBlockById = (id) => analysisData.value?.blocks.find(b => b.id === id)
+
+const getQuestionDisplayTitle = (q) => {
+  const firstId = q.indices?.[0]
+  if (!firstId) return '（空题目�?
+  const block = getBlockById(firstId)
+  return block?.text || '（空题目�?
+}
+
+const autoAssignUnusedBlocks = () => {
+  const data = analysisData.value
+  if (!data || !data.blocks) return
+  const usedIds = new Set()
+  data.questions.forEach(q => q.indices.forEach(id => usedIds.add(id)))
+  Object.keys(targetMap).forEach(key => delete targetMap[key])
+  unassignedBlocks.value = data.blocks.filter(b => !usedIds.has(b.id))
+}
+
+// --- 块编�?---
+const editingBlockId = ref(null)
+const editText = ref('')
+const editInput = ref(null)
+
+const startEdit = (blockId, currentText) => {
+  editingBlockId.value = blockId
+  editText.value = currentText || ''
+  nextTick(() => {
+    editInput.value?.focus()
+  })
+}
+
+const commitEdit = () => {
+  if (editingBlockId.value !== null) {
+    const text = editText.value.trim()
+    if (text) {
+      const block = analysisData.value.blocks.find(b => b.id === editingBlockId.value)
+      if (block) block.text = text
+    }
+    editingBlockId.value = null
+  }
+}
+
+const finishEdit = (blockId) => {
+  if (editingBlockId.value !== blockId) return
+  commitEdit()
+}
+
+// --- 块移�?操作 ---
+const moveBlockToPool = (qIndex, blockId) => {
+  commitEdit()
+  const q = analysisData.value.questions[qIndex]
+  q.indices = q.indices.filter(id => id !== blockId)
+  const block = getBlockById(blockId)
+  if (block && !unassignedBlocks.value.find(b => b.id === blockId)) {
+    unassignedBlocks.value.push(block)
+  }
+}
+
+const moveSingleBlock = (blockId) => {
+  commitEdit()
+  const qIndex = targetMap[blockId]
+  if (qIndex === undefined || qIndex === '') return
+  const block = unassignedBlocks.value.find(b => b.id === blockId)
+  if (!block) return
+  analysisData.value.questions[qIndex].indices.push(blockId)
+  unassignedBlocks.value = unassignedBlocks.value.filter(b => b.id !== blockId)
+  delete targetMap[blockId]
+}
+
+const pasteAllToQuestion = async (qIndex) => {
+  commitEdit()
+  if (unassignedBlocks.value.length === 0) return
+  const ok = await showConfirm(`确定将资源池中所�?${unassignedBlocks.value.length} 个块移入此题吗？`)
+  if (!ok) return
+  const q = analysisData.value.questions[qIndex]
+  const newIds = unassignedBlocks.value.map(b => b.id)
+  q.indices = [...new Set([...q.indices, ...newIds])].sort((a, b) => a - b)
+  unassignedBlocks.value = []
+}
+
+const moveBlockInQuestion = (qIndex, blockIdx, direction) => {
+  commitEdit()
+  const indices = analysisData.value.questions[qIndex].indices
+  const newIdx = blockIdx + direction
+  if (newIdx < 0 || newIdx >= indices.length) return
+  ;[indices[blockIdx], indices[newIdx]] = [indices[newIdx], indices[blockIdx]]
+  analysisData.value.questions[qIndex].indices = [...indices]
+}
+
+// --- 题目增删 ---
+const insertQuestionAfter = (qIndex) => {
+  commitEdit()
+  analysisData.value.questions.splice(qIndex + 1, 0, {
+    title: '',
+    indices: [],
+    type: '',
+    score: 0,
+    tag1: '',
+    tag2: '',
+    tag3: ''
+  })
+}
+
+const addNewQuestionToEnd = () => {
+  commitEdit()
+  analysisData.value.questions.push({
+    title: '',
+    indices: [],
+    type: '',
+    score: 0,
+    tag1: '',
+    tag2: '',
+    tag3: ''
+  })
+}
+
+const deleteQuestion = async (idx) => {
+  commitEdit()
+  const ok = await showConfirm('确定删除？题目内所有块将退回资源池�?)
+  if (!ok) return
+  const question = analysisData.value.questions[idx]
+  question.indices.forEach(id => {
+    const b = getBlockById(id)
+    if (b && !unassignedBlocks.value.find(x => x.id === id)) {
+      unassignedBlocks.value.push(b)
+    }
+  })
+  analysisData.value.questions.splice(idx, 1)
+}
+
+// --- 块增�?---
+const addNewBlock = () => {
+  const text = newBlockText.value.trim()
+  if (!text) return
+  const maxId = analysisData.value.blocks.length > 0
+    ? Math.max(...analysisData.value.blocks.map(b => b.id))
+    : 0
+  const newBlock = { id: maxId + 1, text }
+  analysisData.value.blocks.push(newBlock)
+  unassignedBlocks.value.push(newBlock)
+  newBlockText.value = ''
+}
+
+const permanentDeleteBlock = (id) => {
+  commitEdit()
+  unassignedBlocks.value = unassignedBlocks.value.filter(b => b.id !== id)
+  analysisData.value.blocks = analysisData.value.blocks.filter(b => b.id !== id)
+  delete targetMap[id]
+}
+
+const onQuestionMouseLeave = (qIndex) => {
+  commitEdit()
+  const q = analysisData.value.questions[qIndex]
+  const firstId = q.indices[0]
+  q.title = firstId ? (getBlockById(firstId)?.text || '') : ''
+}
+
+const getBackTarget = () => {
+  if (returnUrl.value && returnUrl.value !== '/devide') {
+    return returnUrl.value
+  }
+  return source.value === 'new-task' ? '/new-task' : '/history'
+}
+
+// --- 保存 ---
+const saveFinalResult = async () => {
+  commitEdit()
+  if (editingMetaField.value) {
+    const [field, idxStr] = editingMetaField.value.split('_')
+    finishMetaEdit(Number(idxStr), field)
+  }
+
+  // 检查是否有任何影响报告的内容变更（仅题目内容）
+  const modifiedQuestions = []
+  analysisData.value.questions.forEach((q, index) => {
+    if (!q._origIndices) return
+    const orig = q._origIndices
+    const curr = q.indices
+    if (orig.length !== curr.length || !orig.every((id, i) => id === curr[i])) {
+      modifiedQuestions.push(index)
+    }
+  })
+
+  // 获取关联的项目信�?
+  let projectsInfo = []
+  try {
+    projectsInfo = await window.documentAPI.getProjectsByDocId(docId.value)
+  } catch (e) {
+    console.error('获取项目关联信息失败', e)
+  }
+  const projectsWithReport = projectsInfo.filter(p => p.hasReport)
+
+  let keepMeta = false
+  if (projectsWithReport.length > 0 && modifiedQuestions.length > 0) {
+    const ok = await showConfirm(
+      `�?${modifiedQuestions.length} 道题目的内容发生了变化，是否保留这些题目的旧标签、题型和分值？`
+    )
+    if (ok) {
+      keepMeta = true
+    }
+  }
+
+  const payloadQuestions = analysisData.value.questions.map((q, index) => {
+    const isNew = !q._origIndices
+    const isModified = modifiedQuestions.includes(index) || isNew
+    const useOld = keepMeta && !isNew && isModified
+    return {
+      title: q.title || '',
+      indices: q.indices,
+      tag1: useOld ? (q._origTags?.tag1 ?? q.tag1) : q.tag1,
+      tag2: useOld ? (q._origTags?.tag2 ?? q.tag2) : q.tag2,
+      tag3: useOld ? (q._origTags?.tag3 ?? q.tag3) : q.tag3,
+      type: useOld ? (q._origTags?.type ?? q.type) : q.type,
+      score: useOld ? (q._origTags?.score ?? q.score) : q.score
+    }
+  })
+
+  const cleanBlocks = analysisData.value.blocks.map(b => ({
+    id: b.id,
+    text: b.text,
+    tag: b.tag
+  }))
+
+  const payload = {
+    blocks: cleanBlocks,
+    questions: payloadQuestions
+  }
+
+  const serializablePayload = JSON.parse(JSON.stringify(payload))
+
+  try {
+    await window.documentAPI.update(docId.value, serializablePayload)
+    await showAlert('划分已保�?)
+    router.push(getBackTarget())
+  } catch (err) {
+    await showAlert('保存失败�? + err.message)
+  }
+}
+
+const handleBack = async () => {
+  commitEdit()
+  if (editingMetaField.value) {
+    const [field, idxStr] = editingMetaField.value.split('_')
+    finishMetaEdit(Number(idxStr), field)
+  }
+  const ok = await showConfirm('返回将丢失未保存的修改，确定吗？')
+  if (!ok) return
+  router.push(getBackTarget())
+}
+</script>
+
+<style scoped>
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>

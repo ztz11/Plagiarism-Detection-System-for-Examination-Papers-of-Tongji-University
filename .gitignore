@@ -1,0 +1,97 @@
+# =============================================================
+# .gitignore — 项目：考试系统后端 (core) + 前端 (front)
+# 仅保留最基础的源代码、配置和逻辑关系
+# =============================================================
+
+# ==================== Python (core) ====================
+
+# 字节码缓存
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+
+# 打包构建产物
+*.egg-info/
+*.egg
+dist/
+build/
+*.spec
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# AI/OCR 模型文件（体积大，需部署时单独获取）
+models/
+distiluse-base-multilingual-cased-v1/
+
+# 第三方便携软件
+LibreOfficePortable/
+
+# 测试文件（仅用于本地开发验证）
+core/test/
+
+# 运行时缓存
+ocr_img_cache/
+core/img_temp/
+
+# ==================== Vue + Electron 前端 (front) ====================
+
+# 依赖包
+node_modules/
+front/node_modules/
+
+# 构建产物
+front/dist/
+front/dist-ssr/
+front/dist-electron/
+front/dist_electron/
+front/coverage/
+*.tsbuildinfo
+
+# 运行时数据文件
+front/save/
+
+# 冗余的分析 / 报告（非源代码）
+front/complexity-frontend.json
+front/experiment_report.md
+
+# 废弃的旧版入口文件（已重构）
+front/src/background.js
+front/main_new.js
+front/new_preload.js
+
+# ==================== IDE / 编辑器 ====================
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==================== 日志 ====================
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.eslintcache
+
+# ==================== 操作系统 ====================
+
+.DS_Store
+Thumbs.db
