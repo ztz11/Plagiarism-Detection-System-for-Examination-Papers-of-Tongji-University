@@ -1,18 +1,35 @@
+"""
+llm_service.py - LLM 服务调用模块
+
+提供与 LLM（大语言模型）交互的核心功能：
+1. 试卷结构分析（题目分割）
+2. 题目信息提取（题型、分数、知识点标签）
+3. 标签相似度检测
+4. 题目相似度计算
+5. 试卷格式校验
+
+技术依赖：
+- OpenAI API 客户端（支持兼容 OpenAI 格式的本地模型如 Ollama、LM Studio）
+- instructor 库（实现结构化输出）
+- PyMuPDF（PDF 文本提取）
+"""
+
 import os
 import shutil
 import subprocess
 import tempfile
 
-import instructor
+import instructor  # 用于强制 LLM 返回结构化输出
 import re
 import json
 from typing import List, Optional, Dict, Any
 
-from openai import OpenAI
-from pydantic import BaseModel, Field
+from openai import OpenAI  # OpenAI API 客户端
+from pydantic import BaseModel, Field  # 数据模型定义
 
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF，用于 PDF 文本提取
 
+# 导入项目数据模型
 from schemas import (
     ExamMap, QuestionInfoResponse,
     TagSimilarityResult, SimilarityScoreResult, QuestionItem
@@ -21,6 +38,11 @@ from schemas import (
 
 # ---------- 格式校验的结构化模型 ----------
 class FormatCheckResult(BaseModel):
+    """
+    单个格式校验项的结果模型
+    
+    用于接收 LLM 返回的结构化校验结果，确保输出格式符合预期。
+    """
     code: str = Field(..., description="校验项代码，如 SUBJECT_NAME_CORRECT_FILLED")
     name: str = Field(..., description="校验项名称")
     passed: bool = Field(..., description="是否通过校验")
@@ -28,21 +50,43 @@ class FormatCheckResult(BaseModel):
 
 
 class FormatValidationOutput(BaseModel):
+    """
+    格式校验输出模型
+    
+    包含所有校验项的结果列表，通过 instructor 强制 LLM 返回此结构。
+    """
     results: List[FormatCheckResult] = Field(..., description="所有校验项的结果列表")
 
-# ---------- 新增：本地文档解析 ----------
+
+# ---------- 本地文档解析函数 ----------
 def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
-    """使用 LibreOffice 将 docx 字节流转为 pdf 字节流"""
+    """
+    使用 LibreOffice 将 DOCX 字节流转为 PDF 字节流
+    
+    参数:
+        docx_bytes: DOCX 文件的二进制数据
+        
+    返回:
+        bytes: PDF 文件的二进制数据
+        
+    抛出:
+        RuntimeError: LibreOffice 未安装或转换失败
+    """
     if not shutil.which("soffice"):
         raise RuntimeError("LibreOffice 未安装或不在 PATH 中")
+    
     with tempfile.TemporaryDirectory() as tmpdir:
         docx_path = os.path.join(tmpdir, "input.docx")
         with open(docx_path, "wb") as f:
             f.write(docx_bytes)
+        
+        # 调用 LibreOffice 转换
         subprocess.run(
             ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmpdir, docx_path],
             check=True, capture_output=True, text=True
         )
+        
+        # 读取转换后的 PDF
         pdf_path = os.path.join(tmpdir, "input.pdf")
         with open(pdf_path, "rb") as f:
             return f.read()
@@ -51,20 +95,37 @@ def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
 def _extract_structured_text(pdf_bytes: bytes,
                              header_height: int = 70,
                              footer_bottom_margin: int = 70) -> str:
-    """从 pdf 字节流提取每页的页眉、正文、页脚，拼成结构化文本"""
+    """
+    从 PDF 字节流提取结构化文本（包含页眉、正文、页脚）
+    
+    将 PDF 每页的内容按区域提取，便于 LLM 进行格式校验。
+    
+    参数:
+        pdf_bytes: PDF 文件的二进制数据
+        header_height: 页眉区域高度（像素）
+        footer_bottom_margin: 页脚区域底部边距（像素）
+        
+    返回:
+        str: 结构化文本，包含每页的页眉、正文、页脚信息
+    """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages = []
     total = doc.page_count
+    
     for i, page in enumerate(doc):
         w, h = page.rect.width, page.rect.height
+        
+        # 定义页面区域
         header_rect = fitz.Rect(0, 0, w, header_height)
         body_rect = fitz.Rect(0, header_height, w, h - footer_bottom_margin)
         footer_rect = fitz.Rect(0, h - footer_bottom_margin, w, h)
 
+        # 提取各区域文本
         header = page.get_text("text", clip=header_rect).strip()
         body = page.get_text("text", clip=body_rect).strip()
         footer = page.get_text("text", clip=footer_rect).strip()
 
+        # 组织成结构化格式
         parts = [f"=== 第 {i+1} 页 / 共 {total} 页 ==="]
         if header:
             parts.append(f"[页眉] {header}")
@@ -72,12 +133,14 @@ def _extract_structured_text(pdf_bytes: bytes,
             parts.append(f"[正文]\n{body}")
         if footer:
             parts.append(f"[页脚] {footer}")
+        
         pages.append("\n".join(parts))
+    
     doc.close()
     return "\n\n".join(pages)
 
 
-# ---------- 新增：本地模式校验函数 ----------
+# ---------- 本地模式格式校验函数 ----------
 def call_llm_for_format_validation_local(
         docx_bytes: bytes,
         enabled_checks: dict,
@@ -86,12 +149,34 @@ def call_llm_for_format_validation_local(
         model_name: str,
         expected_total_score: Optional[float] = None
 ) -> List[Dict[str, Any]]:
-    """本地解析 docx 后直接发送文本给 LLM 进行格式校验"""
+    """
+    本地解析 DOCX 后直接发送文本给 LLM 进行格式校验
+    
+    与远程模式的区别：
+    - 本地模式：先将 DOCX 转换为文本，再发送文本给 LLM
+    - 远程模式：上传 PDF 文件到 LLM 服务端
+    
+    适用场景：
+    - LLM 服务不支持文件上传
+    - 需要减少网络传输量
+    
+    参数:
+        docx_bytes: DOCX 文件的二进制数据
+        enabled_checks: 启用的校验项字典
+        api_key: API 密钥
+        base_url: LLM 服务地址
+        model_name: 模型名称
+        expected_total_score: 预期总分（用于总分校验）
+        
+    返回:
+        List[Dict]: 校验结果列表
+    """
+    # 构建校验提示词
     text_prompt = build_format_validation_prompt(enabled_checks, expected_total_score)
     if text_prompt == "没有需要校验的格式项。":
         return []
 
-    # 1. 本地解析 docx → 结构化文本
+    # 1. 本地解析 DOCX → 结构化文本
     try:
         pdf_bytes = _docx_to_pdf_bytes(docx_bytes)
         document_text = _extract_structured_text(pdf_bytes)
@@ -102,6 +187,7 @@ def call_llm_for_format_validation_local(
     system_content = "你是一个试卷格式校验专家。请仔细阅读以下文档内容，并严格按照要求输出结构化的数据。"
     user_content = f"{text_prompt}\n\n文档内容：\n{document_text}"
 
+    # 创建客户端并调用 LLM
     raw_client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
     client = instructor.from_openai(raw_client)
 
@@ -117,9 +203,10 @@ def call_llm_for_format_validation_local(
         )
         raw_results = [item.dict() for item in output.results]
 
-        # 3. 后处理（与原函数完全相同的逻辑，可抽取共用，这里为清晰直接复制）
+        # 3. 后处理：过滤和补全结果
         enabled_codes = {code for code, enabled in enabled_checks.items() if enabled}
         results_dict = {}
+        
         for res in raw_results:
             code = res.get("code", "").strip()
             if code in enabled_codes:
@@ -138,6 +225,7 @@ def call_llm_for_format_validation_local(
             "OPTIONS_NO_DUPLICATE": "所有选择题的选项编号和内容均无重复",
             "TOTAL_SCORE_IN_PREDETERMINED_RANGE": "总分在预设范围内"
         }
+        
         for code in enabled_codes:
             if code not in results_dict:
                 results_dict[code] = {
