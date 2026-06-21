@@ -1,3 +1,17 @@
+"""
+llm_service.py - LLM 服务调用层
+
+本模块封装了所有与 LLM（大语言模型）的交互逻辑，包括：
+- 试卷智能切分（get_online_segmentation）
+- 题目信息提取（extract_question_info）
+- 标签相似度判断（check_tags_similarity）
+- 题目内容相似度评分（compute_question_similarity）
+- 格式校验（call_llm_for_format_validation / call_llm_for_format_validation_local）
+
+所有 LLM 调用均通过 instructor 库实现结构化输出（Pydantic 模型约束）。
+支持任意 OpenAI 兼容 API（如通义千问、DeepSeek、Ollama 等）。
+"""
+
 import os
 import shutil
 import subprocess
@@ -19,8 +33,9 @@ from schemas import (
 )
 
 
-# ---------- 格式校验的结构化模型 ----------
+# ==================== 格式校验的结构化模型 ====================
 class FormatCheckResult(BaseModel):
+    """LLM 返回的单条格式校验结果"""
     code: str = Field(..., description="校验项代码，如 SUBJECT_NAME_CORRECT_FILLED")
     name: str = Field(..., description="校验项名称")
     passed: bool = Field(..., description="是否通过校验")
@@ -28,11 +43,17 @@ class FormatCheckResult(BaseModel):
 
 
 class FormatValidationOutput(BaseModel):
+    """LLM 格式校验的结构化输出容器"""
     results: List[FormatCheckResult] = Field(..., description="所有校验项的结果列表")
 
-# ---------- 新增：本地文档解析 ----------
+# ==================== 本地文档解析辅助函数 ====================
+
 def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
-    """使用 LibreOffice 将 docx 字节流转为 pdf 字节流"""
+    """
+    使用 LibreOffice headless 模式将 DOCX 字节流转换为 PDF 字节流。
+
+    用于本地格式校验模式：先将 DOCX 转 PDF，再从 PDF 提取结构化文本。
+    """
     if not shutil.which("soffice"):
         raise RuntimeError("LibreOffice 未安装或不在 PATH 中")
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -51,7 +72,16 @@ def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
 def _extract_structured_text(pdf_bytes: bytes,
                              header_height: int = 70,
                              footer_bottom_margin: int = 70) -> str:
-    """从 pdf 字节流提取每页的页眉、正文、页脚，拼成结构化文本"""
+    """
+    从 PDF 字节流提取每页的页眉、正文、页脚，拼接为结构化文本。
+
+    使用 PyMuPDF 按区域裁剪提取：
+    - 页眉区：页面顶部 header_height 像素
+    - 正文区：页眉下方到页脚上方
+    - 页脚区：页面底部 footer_bottom_margin 像素
+
+    输出格式便于 LLM 进行格式校验（如检查页眉页码等）。
+    """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages = []
     total = doc.page_count
@@ -77,7 +107,8 @@ def _extract_structured_text(pdf_bytes: bytes,
     return "\n\n".join(pages)
 
 
-# ---------- 新增：本地模式校验函数 ----------
+# ==================== 格式校验函数 ====================
+
 def call_llm_for_format_validation_local(
         docx_bytes: bytes,
         enabled_checks: dict,
@@ -86,7 +117,12 @@ def call_llm_for_format_validation_local(
         model_name: str,
         expected_total_score: Optional[float] = None
 ) -> List[Dict[str, Any]]:
-    """本地解析 docx 后直接发送文本给 LLM 进行格式校验"""
+    """
+    本地模式格式校验：DOCX → PDF → 结构化文本 → LLM。
+
+    适用于不支持文件上传的 LLM API（如本地 Ollama），
+    在本地完成文档解析后仅发送纯文本给 LLM。
+    """
     text_prompt = build_format_validation_prompt(enabled_checks, expected_total_score)
     if text_prompt == "没有需要校验的格式项。":
         return []
@@ -156,9 +192,10 @@ def call_llm_for_format_validation_local(
 
 def build_format_validation_prompt(enabled_checks: dict, expected_total_score: Optional[float] = None) -> str:
     """
-    构建格式校验的文本指令部分。
-    如果 TOTAL_SCORE_IN_PREDETERMINED_RANGE 启用，则加入总分校验规则。
-    重要：在输出格式中明确列出所有标准代码，要求 LLM 严格使用。
+    构建格式校验的 LLM 提示词。
+
+    根据启用的校验项动态生成包含详细校验规则和输出格式的提示词。
+    如果 TOTAL_SCORE_IN_PREDETERMINED_RANGE 启用，则嵌入预期总分。
     """
     check_descriptions = {
         "SUBJECT_NAME_CORRECT_FILLED": {
@@ -260,7 +297,10 @@ def build_format_validation_prompt(enabled_checks: dict, expected_total_score: O
 
 
 def _build_fallback_results(enabled_checks: dict, reason: str) -> List[Dict[str, Any]]:
-    """降级处理：返回所有开启项为未通过，并给出原因"""
+    """
+    降级处理：当 LLM 调用失败或文件解析失败时，
+    将所有开启的校验项标记为"未通过"，原因字段填入错误信息。
+    """
     check_names = {
         "SUBJECT_NAME_CORRECT_FILLED": "科目名称是否正确填写",
         "SUBJECT_CODE_CORRECT_FILLED": "科目代码是否正确填写",
@@ -294,9 +334,16 @@ def call_llm_for_format_validation(
         expected_total_score: Optional[float] = None
 ) -> List[Dict[str, Any]]:
     """
-    直接将 PDF 文件上传到 LLM 服务端，并通过 fileid:// 协议引用。
-    使用 instructor 保证结构化输出。
-    expected_total_score: 预期的试卷总分，用于 TOTAL_SCORE_IN_PREDETERMINED_RANGE 校验。
+    远程模式格式校验：上传 PDF 文件到 LLM 服务端进行格式校验。
+
+    适用于支持文件上传的 LLM API（如通义千问、DeepSeek 等）。
+    流程：
+    1. 上传 PDF 文件到 LLM → 获取 file_id
+    2. 通过 fileid:// 协议在 system prompt 中引用文件
+    3. LLM 直接读取 PDF 内容进行校验
+    4. 校验完成后自动删除临时文件
+
+    参数 expected_total_score: 用于 TOTAL_SCORE_IN_PREDETERMINED_RANGE 校验。
     """
     print("=" * 60)
     print("📋 格式校验请求参数")
@@ -410,7 +457,8 @@ def call_llm_for_format_validation(
                 print(f"⚠️ 删除文件失败: {e}")
 
 
-# ---------- 以下为原有函数（未修改） ----------
+# ==================== 试卷切分与题目分析 ====================
+
 def get_online_segmentation(
         blocks: list,
         api_key: str,
@@ -418,6 +466,13 @@ def get_online_segmentation(
         base_url: str,
         model_name: str
 ) -> ExamMap:
+    """
+    使用 LLM 对试卷 block 列表进行智能切分。
+
+    将试题相关的多个 block（如题目描述、选项、图表等）合并为题目组，
+    输出 ExamMap 结构（每道题包含所属 block 的 ID 列表）。
+    prompt 参数定义切分规则和输出格式。
+    """
     clean_blocks = []
     for b in blocks:
         clean_blocks.append({
@@ -453,6 +508,13 @@ def extract_question_info(
         model_name: str,
         context_blocks: Optional[List[str]] = None
 ) -> QuestionInfoResponse:
+    """
+    使用 LLM 从题目正文中提取题型、分值和 3 个知识标签。
+
+    支持通过 context_blocks（上下文 block 文本，如章节标题）辅助分值推断。
+    包含多层分值回退策略：LLM 输出 → 正则从正文提取 → 正则从上下文提取。
+    异常时返回默认值（题型=未知，分数=0，标签=其他考点）。
+    """
     try:
         instruction = (
             "你是一位中学/大学试题分析专家，请严格按以下规则解析题目。\n\n"
@@ -537,6 +599,12 @@ def check_tags_similarity(
         base_url: str,
         model_name: str
 ) -> bool:
+    """
+    LLM 模式下的标签初筛：判断两组标签中是否存在语义相似的配对。
+
+    这是 LLM 相似度检测的第一阶段过滤——标签不相似则无需进行内容比较。
+    容错：任一组标签为空则直接返回 True（跳过初筛）。
+    """
     if not tags1 or not tags2:
         return True
 
@@ -574,6 +642,17 @@ def compute_question_similarity(
         model_name: str,
         reason_threshold: float = 60.0
 ) -> tuple[int, str]:
+    """
+    LLM 模式下的题目内容相似度评分。
+
+    从三个维度比较两道题目：
+    1. 考查的核心知识点是否一致
+    2. 解题思路和关键步骤是否相同
+    3. 是否存在仅表面修改（换数字、换名称、换情境等）
+
+    返回 (相似度0-100, 重复原因说明)。
+    当相似度 ≥ reason_threshold 时生成原因说明，否则原因为空字符串。
+    """
     system_msg = (
         "你是一位教育内容分析专家。请分析两道题目是否语义重复，"
         "即是否考查相同的知识点和解题方法，即使题面、数值、情境做了修改。"

@@ -114,6 +114,14 @@
 </template>
 
 <script setup>
+/**
+ * report.vue - 查重报告查看页面
+ *
+ * 展示项目的查重分析结果，包括：
+ * - 格式校验结果（通过/未通过列表）
+ * - 重复题目对及相似度评分
+ * - 生成标注 DOCX 报告（红色高亮重复内容）
+ */
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 

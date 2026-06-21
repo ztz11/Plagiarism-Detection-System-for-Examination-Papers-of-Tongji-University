@@ -161,6 +161,12 @@
 </template>
 
 <script setup>
+/**
+ * profile.vue - 用户个人信息页面
+ *
+ * 展示当前用户信息，支持修改密码和个人资料。
+ * 管理员（role=1）可在此创建和管理其他用户账号。
+ */
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 

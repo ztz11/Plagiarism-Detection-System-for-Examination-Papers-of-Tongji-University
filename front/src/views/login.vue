@@ -56,6 +56,12 @@
 </template>
 
 <script setup>
+/**
+ * login.vue - 用户登录页面
+ *
+ * 通过员工 ID 和密码进行身份验证。
+ * 使用 localStorage 持久化登录状态，成功后跳转到主菜单（/menu）。
+ */
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 

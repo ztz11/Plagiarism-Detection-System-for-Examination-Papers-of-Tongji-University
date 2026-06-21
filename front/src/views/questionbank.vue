@@ -432,6 +432,13 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * questionbank.vue - 题库管理页面
+ *
+ * 展示所有已上传和切分的试卷文档，按项目分组管理。
+ * 支持查看题目详情、编辑题目标签/题型/分值、删除文档。
+ * 包含学科筛选和搜索功能。
+ */
 import { ref, h, onMounted, computed, reactive, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 

@@ -131,6 +131,15 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * newtask.vue - 新建查重项目页面
+ *
+ * 功能：
+ * 1. 输入项目名称（唯一性校验）
+ * 2. 搜索并选择学科代码（自动补全）
+ * 3. 输入试卷总分（0-300 校验）
+ * 4. 提交后跳转到试卷切分页面（/devide）
+ */
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
@@ -139,7 +148,7 @@ interface Subject {
   name: string
 }
 
-// ---------- 用户信息 ----------
+// ==================== 用户信息 ====================
 const currentUser = ref({ fullName: '', employeeId: '' })
 const router = useRouter()
 const route = useRoute()
@@ -190,7 +199,7 @@ const handleDialogCancel = () => {
   dialogResolve?.(false)
 }
 
-// ---------- 表单 & API 逻辑 ----------
+// ==================== 表单 & API 逻辑 ====================
 const projectName = ref('')
 const subjectInput = ref('')
 const selectedSubject = ref<Subject | null>(null)
